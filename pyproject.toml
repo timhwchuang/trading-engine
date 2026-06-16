@@ -29,9 +29,9 @@ dependencies = []
 shioaji = ["shioaji"]
 
 [project.urls]
-Homepage = "https://github.com/example/trading-engine"
-Documentation = "https://github.com/example/trading-engine/blob/main/SPEC.md"
-Repository = "https://github.com/example/trading-engine"
+Homepage = "https://github.com/timhwchuang/trading-engine"
+Documentation = "https://github.com/timhwchuang/trading-engine/blob/main/SPEC.md"
+Repository = "https://github.com/timhwchuang/trading-engine"
 
 [tool.setuptools.packages.find]
 where = ["src"]

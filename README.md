@@ -33,27 +33,27 @@
 
 ```bash
 # 最新 main
-pip install git+https://github.com/<你的帳號>/trading-engine.git
+pip install git+https://github.com/timhwchuang/trading-engine.git
 
 # 鎖定 tag（建議發版時打 git tag）
-pip install git+https://github.com/<你的帳號>/trading-engine.git@v0.1.0
+pip install git+https://github.com/timhwchuang/trading-engine.git@v0.1.0
 
 # Live 需要 Shioaji SDK
-pip install "trading-engine[shioaji] @ git+https://github.com/<你的帳號>/trading-engine.git@v0.1.0"
+pip install "trading-engine[shioaji] @ git+https://github.com/timhwchuang/trading-engine.git@v0.1.0"
 ```
 
 在 consuming repo 的 `pyproject.toml`：
 
 ```toml
 dependencies = [
-  "trading-engine @ git+https://github.com/<你的帳號>/trading-engine.git@v0.1.0",
+  "trading-engine @ git+https://github.com/timhwchuang/trading-engine.git@v0.1.0",
 ]
 ```
 
 ### 本地開發
 
 ```bash
-git clone https://github.com/<你的帳號>/trading-engine.git
+git clone https://github.com/timhwchuang/trading-engine.git
 cd trading-engine
 
 pip install -e .              # 核心（跑 kernel tests 不需 shioaji）
@@ -145,7 +145,8 @@ python run_tests.py
 ```
 
 **63** kernel tests（qty、adversarial callbacks、reconnect、sync、force-flatten、core 無 shioaji import）。  
-整合測（策略 + live smoke）在 consuming app repo。
+整合測（策略 + live smoke）在 consuming app repo。  
+CI：push / PR 至 `main` 時自動跑 `python run_tests.py`（Python 3.11–3.13）。
 
 ## Version
 
