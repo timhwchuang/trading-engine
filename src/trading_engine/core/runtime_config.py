@@ -120,6 +120,18 @@ class RuntimeConfig:
     def ca_passwd(self) -> str:
         return os.environ.get("SJ_CA_PASSWD", "")
 
+    @property
+    def dump_order_events(self) -> bool:
+        return False
+
+    @property
+    def tick_archive(self) -> bool:
+        return False
+
+    @property
+    def kbars_archive(self) -> bool:
+        return False
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._base, name)
 

@@ -128,8 +128,8 @@ theman 對應路徑改為 **re-export 薄層**（2–5 行）。
 
 | 階段 | 做法 |
 |------|------|
-| **現在** | theman 158 tests 覆蓋 engine 行為 |
-| **目標** | trading-engine 自有最小 kernel test suite（state machine、adapter、session） |
+| **現在** | 各 repo 自有 test suite（37 + 15 + 27）；theman 79 整合測 |
+| **CI** | `scripts/run-all-tests.sh` 或各 repo `run_tests.py` |
 
 Kernel tests 應能在 **不裝 Shioaji、不裝 strategy plugin** 下跑完。
 
