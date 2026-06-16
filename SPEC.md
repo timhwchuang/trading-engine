@@ -1,7 +1,7 @@
 # Trading Repo Spec
 
 > **Package**: `trading-engine` · **Import**: `trading_engine`  
-> 使用者入口：[README.md](README.md) · 狀態機：[docs/DESIGN.md](docs/DESIGN.md) · 策略：[docs/STRATEGY.md](docs/STRATEGY.md) · 實盤安全：[docs/LIVE_SAFETY.md](docs/LIVE_SAFETY.md) · UAT：[docs/UAT_CHECKLIST.md](docs/UAT_CHECKLIST.md) · [CHANGELOG.md](CHANGELOG.md)
+> 使用者入口：[README.md](README.md) · 狀態機：[docs/DESIGN.md](docs/DESIGN.md) · 策略：[docs/STRATEGY.md](docs/STRATEGY.md) · 實盤安全：[docs/LIVE_SAFETY.md](docs/LIVE_SAFETY.md) · UAT：[docs/UAT_CHECKLIST.md](docs/UAT_CHECKLIST.md) · 回測契約：[docs/BACKTEST_HOST_CONTRACT.md](docs/BACKTEST_HOST_CONTRACT.md) · [CHANGELOG.md](CHANGELOG.md)
 
 ## 1. 定位
 
