@@ -4,6 +4,18 @@ All notable changes to `trading-engine` are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).  
 Versioning follows [SemVer](https://semver.org/) (0.x = API may still evolve).
 
+## [0.2.1] - 2026-06-16
+
+Patch release to support `strategy-vwap-momentum` v0.1.0 (first public reference strategy plugin) and improve sweep integration.
+
+### Added
+- `momentum_timeout_sec` (with const `MOMENTUM_TIMEOUT_SEC`) to `Settings`, `SWEEP_FIELD_TO_CONST`, `_CONST_TO_SNAKE`, and test defaults.
+  - Enables first-class `patch_strategy_params` / sweep support for the momentum episode timeout in strategy plugins.
+  - Default 180s (matching previous hardcoded value in the reference plugin).
+
+### Changed
+- `SWEEPABLE_PARAMS` in consuming strategy plugins (e.g. `strategy-vwap-momentum`) will now automatically surface `MOMENTUM_TIMEOUT_SEC`.
+
 ## [0.2.0] - 2026-06-16
 
 UAT-ready release addressing [CodeReview#2](CodeReview#2.md) (see [CodeReview#2-re.md](CodeReview#2-re.md) for re-review).

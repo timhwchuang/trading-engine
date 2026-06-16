@@ -20,6 +20,7 @@ def default_test_settings() -> Settings:
         momentum_sell_ratio=0.78,
         exhaustion_vol=15,
         cooldown_sec=10,
+        momentum_timeout_sec=180,
         max_daily_loss_points=120,
         max_consecutive_loss=4,
         fixed_tp_points=20,

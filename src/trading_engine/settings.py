@@ -19,6 +19,7 @@ class Settings:
     momentum_sell_ratio: float
     exhaustion_vol: int
     cooldown_sec: int
+    momentum_timeout_sec: int
     max_daily_loss_points: int
     max_consecutive_loss: int
     fixed_tp_points: int
