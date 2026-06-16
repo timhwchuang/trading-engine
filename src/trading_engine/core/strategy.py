@@ -1,8 +1,8 @@
 """Strategy interface (Protocol + optional ABC base).
 
-The execution host (`runtime.TradingEngine`) and replay host (`backtest.BacktestEngine`)
-inject a decision-logic instance via ``strategy=``. Implement ``Strategy`` (or subclass
-``BaseStrategy``) and pass it to either host constructor.
+The execution host (``TradingEngine``) and replay host (``BacktestEngine``)
+inject a decision-logic instance via ``strategy=``. Implement ``Strategy`` (or
+subclass ``BaseStrategy``) and pass it to either host constructor.
 
 Design goals:
 - Code to interface, not implementation.
@@ -18,7 +18,6 @@ from typing import Callable, Optional, Protocol
 from trading_engine.core.audit.signal_audit import SignalAudit
 from trading_engine.core.types import (
     MarketSnapshot,
-    MomentumState,
     OrderSignal,
     PositionSnapshot,
     RiskGate,
@@ -27,14 +26,11 @@ from trading_engine.core.types import (
 
 
 class Strategy(Protocol):
-    """Pluggable strategy decision contract.
+    """Pluggable strategy decision contract (community v1).
 
-    The host is responsible for market snapshots, position/risk gates, vol thresholds,
-    order execution, locks, and session lifecycle. The strategy owns signal generation
-    and any intra-episode state (e.g. momentum tracking).
+    Required: ``evaluate``, ``reset``.
+    Optional helpers have no-op defaults on ``BaseStrategy``.
     """
-
-    momentum: MomentumState
 
     def evaluate(
         self,
@@ -51,13 +47,7 @@ class Strategy(Protocol):
         ...
 
     def reset(self) -> None:
-        """Reset episode / momentum state (called by host after fills)."""
-        ...
-
-    def activate_momentum(self, direction: str, price: float, ts: int) -> None:
-        ...
-
-    def update_momentum_peak(self, price: float) -> None:
+        """Reset intra-episode state (called by host after fills / session)."""
         ...
 
     def manage_exit(
@@ -96,14 +86,6 @@ class Strategy(Protocol):
 class BaseStrategy(ABC):
     """Convenience ABC with default no-op / empty implementations."""
 
-    def __init__(self) -> None:
-        self.momentum = MomentumState(
-            active=False,
-            direction="None",
-            peak=0.0,
-            trigger_time=0,
-        )
-
     @abstractmethod
     def evaluate(
         self,
@@ -119,30 +101,8 @@ class BaseStrategy(ABC):
         ...
 
     def reset(self) -> None:
-        self.momentum = MomentumState(
-            active=False,
-            direction="None",
-            peak=0.0,
-            trigger_time=0,
-        )
-
-    def reset_momentum(self) -> None:
-        """Backward-compatible alias; host calls ``reset()``."""
-        self.reset()
-
-    def activate_momentum(self, direction: str, price: float, ts: int) -> None:
-        self.momentum = MomentumState(
-            active=True,
-            direction=direction,
-            peak=price,
-            trigger_time=ts,
-        )
-
-    def update_momentum_peak(self, price: float) -> None:
-        if self.momentum.direction == "Long":
-            self.momentum.peak = max(self.momentum.peak, price)
-        elif self.momentum.direction == "Short":
-            self.momentum.peak = min(self.momentum.peak, price)
+        """Reset strategy-local state. Override in plugins as needed."""
+        return None
 
     def manage_exit(
         self, market: MarketSnapshot, position: PositionSnapshot

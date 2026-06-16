@@ -184,7 +184,7 @@ class SessionMixin:
                 self.trailing_peak = self.entry_price
                 self._resynced_position = True
             self._activate_vwap_stop_immediately()
-            self.reset_momentum()
+            self.reset_strategy_state()
             if not preserve_peak:
                 logger.info(
                     "持倉對帳 | %s %d口 @ %.1f | code=%s | peak 待首 tick 校準",

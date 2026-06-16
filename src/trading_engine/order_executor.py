@@ -118,11 +118,13 @@ class OrderExecutorMixin:
             self.block_new_entry = True
         return signal
 
-    def activate_momentum(self, direction: str, price: float, ts: int):
-        self.strategy.activate_momentum(direction, price, ts)
-
-    def reset_momentum(self):
+    def reset_strategy_state(self) -> None:
+        """Reset strategy episode state after fills / session events."""
         self.strategy.reset()
+
+    def reset_momentum(self) -> None:
+        """Backward-compatible alias for ``reset_strategy_state``."""
+        self.reset_strategy_state()
 
     def manage_exit(self, price: float, ts: int) -> Optional[OrderSignal]:
         dt = self._last_tick_exchange_dt or datetime.datetime.fromtimestamp(ts)
@@ -454,7 +456,7 @@ class OrderExecutorMixin:
                 ioc_slippage_allowed=self.pending_ioc_slippage,
             )
             logger.info("FILL_AUDIT %s", self._telemetry.format_fill_audit(fill_audit))
-            self.reset_momentum()
+            self.reset_strategy_state()
             self._clear_pending()
             logger.info("進場完成 | %s %d口 @ %.1f", self.position_dir, deal_qty, price)
             return False

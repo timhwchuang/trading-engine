@@ -196,38 +196,6 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
     def trend_strength(self) -> float:
         return self.indicators.trend_strength
 
-    @property
-    def momentum_active(self) -> bool:
-        return self.strategy.momentum.active
-
-    @momentum_active.setter
-    def momentum_active(self, value: bool) -> None:
-        self.strategy.momentum.active = value
-
-    @property
-    def momentum_dir(self) -> str:
-        return self.strategy.momentum.direction
-
-    @momentum_dir.setter
-    def momentum_dir(self, value: str) -> None:
-        self.strategy.momentum.direction = value
-
-    @property
-    def momentum_trigger_time(self) -> int:
-        return self.strategy.momentum.trigger_time
-
-    @momentum_trigger_time.setter
-    def momentum_trigger_time(self, value: int) -> None:
-        self.strategy.momentum.trigger_time = value
-
-    @property
-    def momentum_peak(self) -> float:
-        return self.strategy.momentum.peak
-
-    @momentum_peak.setter
-    def momentum_peak(self, value: float) -> None:
-        self.strategy.momentum.peak = value
-
     def build_entry_audit(
         self, dt: datetime.datetime, price: float, ts: int, direction: str
     ) -> SignalAudit:
@@ -328,8 +296,6 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
                 if self._resynced_position:
                     self._calibrate_trailing_peak_after_resync(price)
                 self._update_trailing_peak(price)
-            elif self.strategy.momentum.active:
-                self.strategy.update_momentum_peak(price)
             signal = self.process_strategy(ts, price, tick.datetime)
             if signal is not None:
                 if signal.intent == "entry":
