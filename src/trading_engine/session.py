@@ -140,7 +140,7 @@ class SessionMixin:
 
         with self.lock:
             if matched is None:
-                self.has_position = False
+                self.position_qty = 0
                 self.position_dir = "Flat"
                 self.entry_price = 0.0
                 self.trailing_peak = 0.0
@@ -159,17 +159,17 @@ class SessionMixin:
                     logger.info("持倉對帳 | 無持倉")
                 return
 
-            import shioaji as sj
+            from trading_engine.adapters.position_normalizer import is_long_direction
 
-            is_long = matched.direction in (sj.Action.Buy, "Buy")
+            is_long = is_long_direction(matched.direction)
             new_dir = "Long" if is_long else "Short"
-            had_position = self.has_position
+            had_position = self.position_qty > 0
             same_direction = had_position and self.position_dir == new_dir
             preserve_peak = (
                 had_position and same_direction and not force_resync
             )
 
-            self.has_position = True
+            self.position_qty = int(matched.quantity)
             self.position_dir = new_dir
             self.entry_price = float(matched.price)
             if preserve_peak:

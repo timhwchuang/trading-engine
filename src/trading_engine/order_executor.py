@@ -9,6 +9,7 @@ import threading
 from typing import Any, Optional, Tuple
 
 from trading_engine.core.order_events import is_futures_deal, is_futures_order
+from trading_engine.core.trading_state import PendingIntent
 from trading_engine.core.types import OrderSignal
 
 from trading_engine.order_errors import OrderErrorCategory, classify_order_error, should_retry_order
@@ -40,11 +41,26 @@ class OrderExecutorMixin:
         )
         self.pending_exit_reason = (
             signal.audit.reason
-            if signal.audit is not None and signal.intent == "exit"
+            if signal.audit is not None and signal.intent == PendingIntent.EXIT
             else ""
         )
-        if signal.intent == "exit":
+        if signal.intent == PendingIntent.EXIT:
             self.exit_pending = True
+
+        # Phase 4 defensive guard (logs only)
+        try:
+            from trading_engine.core.trading_state import validate_pending_consistency
+
+            validate_pending_consistency(
+                is_pending=self.is_pending,
+                pending_intent=self.pending_intent,
+                exit_pending=self.exit_pending,
+                position_qty=self.position_qty,
+                position_dir=self.position_dir,
+                logger=logger,
+            )
+        except Exception:
+            pass  # never let guard break hot path
 
     @staticmethod
     def _log_signal_audit(signal: OrderSignal) -> None:
@@ -133,6 +149,49 @@ class OrderExecutorMixin:
             market, self._position_snapshot()
         )
         return signal
+
+    def _maybe_kernel_force_flatten(
+        self, ts: int, price: float, dt: datetime.datetime
+    ) -> Optional[OrderSignal]:
+        """Kernel-owned force flatten at session_force_flatten_time.
+
+        Strategy may return a custom OrderSignal via session_force_flatten_signal
+        (for price/slippage/audit customization). If None, kernel synthesizes a
+        standard full exit using flatten_slippage_points.
+        """
+        if self.position_qty <= 0:
+            return None
+        if self.is_pending or self.exit_pending:
+            return None
+        risk = self._risk_gate(ts, dt)
+        if not risk.force_flatten:
+            return None
+
+        market = self.indicators.snapshot(ts, price, dt)
+        position = self._position_snapshot()
+
+        # Strategy hook for customization (price, slippage, reason, audit)
+        custom, _effects = self.strategy.session_force_flatten_signal(
+            market, position, self._cfg.session_force_flatten_time
+        )
+        if custom is not None:
+            # Trust strategy provided signal but ensure intent/qty safety for first version
+            if custom.intent != "exit":
+                custom = None  # fallthrough to default
+            else:
+                return custom
+
+        # Default kernel-produced exit (full position, using configured flatten slippage)
+        action = "Sell" if self.position_dir == "Long" else "Buy"
+        return OrderSignal(
+            action=action,
+            qty=self.position_qty,
+            ref_price=price,
+            intent="exit",
+            exchange_ts=ts,
+            slippage_points=self._cfg.flatten_slippage_points,
+            # audit left to None for pure kernel forced; consumers can enrich via telemetry
+        )
 
     def _clear_entry_tracking(self) -> None:
         self.entry_exchange_ts = 0
@@ -242,9 +301,11 @@ class OrderExecutorMixin:
             action = self._pending_action
             if not action:
                 action = "Sell" if self.position_dir == "Long" else "Buy"
+            # Phase 1: prefer actual position_qty for exit sizing (full flatten policy)
+            exit_qty = self.position_qty if self.position_qty > 0 else (self.pending_qty or 1)
             return OrderSignal(
                 action,
-                self.pending_qty or 1,
+                exit_qty,
                 self.pending_signal_price,
                 "exit",
                 exchange_ts=self.pending_exchange_ts,
@@ -373,7 +434,7 @@ class OrderExecutorMixin:
         if status in ("Cancelled", "Failed") or op_type in ("Cancel", "Delete"):
             deal_qty = msg.get("status", {}).get("deal_quantity", 0)
             if deal_qty == 0:
-                if self.pending_intent == "entry":
+                if self.pending_intent == PendingIntent.ENTRY:
                     tag = "intent_cancelled"
                     if (
                         self._pending_intent_cancel_exchange_dt is not None
@@ -423,7 +484,21 @@ class OrderExecutorMixin:
     ) -> bool:
         """套用成交。回傳 True 表示須在 lock 外呼叫 sync_positions()。"""
         expected = self.pending_qty if self.pending_qty > 0 else 1
+        if deal_qty > expected:
+            logger.warning(
+                "成交口數超過 pending | deal=%d expected=%d order=%s",
+                deal_qty,
+                expected,
+                self.pending_order_id,
+            )
         self.filled_qty = getattr(self, "filled_qty", 0) + deal_qty
+        if self.filled_qty > expected:
+            logger.warning(
+                "累計成交超過 pending | filled=%d expected=%d order=%s",
+                self.filled_qty,
+                expected,
+                self.pending_order_id,
+            )
         if self.filled_qty < expected:
             logger.info(
                 "部分成交進度 | intent=%s %d/%d (deal=%d) order=%s | pending 持續（IOC 未結束不全解鎖）",
@@ -438,8 +513,15 @@ class OrderExecutorMixin:
         intent = self.pending_intent
         order_id = self.pending_order_id or ""
         direction = "Buy" if is_buy else "Sell"
-        if intent == "entry":
-            self.has_position = True
+        if intent == PendingIntent.ENTRY:
+            if self.has_position:
+                logger.warning(
+                    "STATE_GUARD unexpected entry fill while positioned | qty=%d dir=%s order=%s",
+                    self.position_qty,
+                    self.position_dir,
+                    order_id,
+                )
+            self.position_qty = self.filled_qty  # Phase 1: use accumulated filled for this pending
             self.entry_price = price
             self.position_dir = "Long" if is_buy else "Short"
             self.trailing_peak = price
@@ -458,10 +540,10 @@ class OrderExecutorMixin:
             logger.info("FILL_AUDIT %s", self._telemetry.format_fill_audit(fill_audit))
             self.reset_strategy_state()
             self._clear_pending()
-            logger.info("進場完成 | %s %d口 @ %.1f", self.position_dir, deal_qty, price)
+            logger.info("進場完成 | %s %d口 @ %.1f", self.position_dir, self.position_qty, price)
             return False
 
-        elif intent == "exit" and self.has_position:
+        elif intent == PendingIntent.EXIT and self.has_position:
             if self.position_dir == "Long":
                 pnl = price - self.entry_price
             else:
@@ -494,7 +576,7 @@ class OrderExecutorMixin:
             self._telemetry.update_risk_state(self.daily_pnl, self.consecutive_loss)
             logger.info("FILL_AUDIT %s", self._telemetry.format_fill_audit(fill_audit))
 
-            self.has_position = False
+            self.position_qty = 0
             self.position_dir = "Flat"
             self.entry_price = 0.0
             self.trailing_peak = 0.0
@@ -508,6 +590,27 @@ class OrderExecutorMixin:
                 self.consecutive_loss,
             )
             return False
+
+        if intent == PendingIntent.EXIT and not self.has_position:
+            logger.warning(
+                "STATE_GUARD unexpected exit fill while flat | order=%s",
+                order_id,
+            )
+
+        # Phase 4: light state guard after fill (defensive logging)
+        try:
+            from trading_engine.core.trading_state import validate_pending_consistency
+
+            validate_pending_consistency(
+                is_pending=self.is_pending,
+                pending_intent=self.pending_intent,
+                exit_pending=self.exit_pending,
+                position_qty=getattr(self, "position_qty", 0),
+                position_dir=getattr(self, "position_dir", "Flat"),
+                logger=logger,
+            )
+        except Exception:
+            pass
 
         return False
 

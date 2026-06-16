@@ -10,13 +10,10 @@ import queue
 import sys
 from collections import deque
 import threading
-from typing import TYPE_CHECKING, Any, Deque, List, Optional, Tuple
-
-if TYPE_CHECKING:
-    from shioaji import TickFOPv1
+from typing import Any, Callable, Deque, List, Optional, Tuple
 
 from trading_engine.core.ports import BrokerPort
-from trading_engine.core.types import OrderSignal
+from trading_engine.core.types import OrderSignal, TickSnapshot
 from trading_engine.calendar.port import MarketCalendarPort, TaifexMarketCalendar
 from trading_engine.core.audit.signal_audit import SignalAudit, format_signal_audit
 from trading_engine.order_errors import (
@@ -50,7 +47,7 @@ from trading_engine.session import SessionMixin
 class TradingEngine(OrderExecutorMixin, SessionMixin):
     def __init__(
         self,
-        api: "BrokerPort | None" = None,
+        api: BrokerPort,
         clock: Any = None,
         strategy: Strategy | None = None,
         runtime_config: RuntimeConfig | None = None,
@@ -71,22 +68,19 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         self._archive = archive or NullArchivePort()
         self._trend_refresh = trend_refresh or NullTrendRefreshPort()
         self._calendar = calendar or TaifexMarketCalendar()
-        if api is not None:
-            self.api = api
-        else:
-            # Lazy import: keep shioaji out of the module-top import surface so the
-            # engine reads as broker-agnostic (live wiring injects the concrete api).
-            import shioaji as sj
-
-            self.api = sj.Shioaji(simulation=self._cfg.simulation)
+        if api is None:
+            raise TypeError("api is required; inject a BrokerPort at the app layer")
+        self.api = api
         self._order_adapter = order_adapter
+        # Optional hook set by live bootstrap (e.g. ShioajiLiveBootstrap.subscribe_tick).
+        self._resubscribe_ticks: Optional[Callable[[], None]] = None
         # 注入式時鐘：實盤預設 time.time()；回測傳入 tick 時間驅動的時鐘以確保確定性。
         self._clock = clock if clock is not None else time.time
         if strategy is None:
             raise TypeError("strategy is required; inject at app layer")
 
-        # 持倉狀態
-        self.has_position = False
+        # 持倉狀態（Phase 1: position_qty 為單一事實來源；has_position 為 derived property）
+        self.position_qty = 0
         self.position_dir = "Flat"          # Long / Short / Flat
         self.entry_price = 0.0
         self.entry_exchange_ts = 0
@@ -196,6 +190,11 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
     def trend_strength(self) -> float:
         return self.indicators.trend_strength
 
+    @property
+    def has_position(self) -> bool:
+        """Derived from position_qty (single source of truth for Phase 1+)."""
+        return self.position_qty > 0
+
     def build_entry_audit(
         self, dt: datetime.datetime, price: float, ts: int, direction: str
     ) -> SignalAudit:
@@ -229,6 +228,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
             trailing_peak=self.trailing_peak,
             entry_exchange_ts=self.entry_exchange_ts,
             ticks_since_entry=self.ticks_since_entry,
+            qty=self.position_qty,
         )
 
     def _risk_gate(self, ts: int, dt: datetime.datetime) -> RiskGate:
@@ -250,7 +250,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         )
 
     def _parse_tick_locked(
-        self, tick: TickFOPv1
+        self, tick: Any
     ) -> Tuple[int, float, int, int, int]:
         """Parse tick inside lock; infer buy/sell from price when type0."""
         ts = int(tick.datetime.timestamp())
@@ -273,20 +273,38 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
             self._telemetry.record_tick_type(original_tick_type, tick_type)
         return ts, price, volume, tick_type, original_tick_type
 
-    def on_tick(self, tick: TickFOPv1):
+    def on_tick(self, tick: Any):
+        """Accept either native broker tick (e.g. Shioaji TickFOPv1 via live adapter)
+        or a TickSnapshot (preferred internal normalized form for decoupling).
+        """
         signal: Optional[OrderSignal] = None
         ts = 0
         price = 0.0
         volume = 0
         tick_type = 0
         original_tick_type = 0
+        exchange_dt = None
         lock_wait_start = time.perf_counter()
         with self.lock:
             self._telemetry.record_lock_wait((time.perf_counter() - lock_wait_start) * 1000)
-            ts, price, volume, tick_type, original_tick_type = self._parse_tick_locked(
-                tick
-            )
-            self._record_tick_arrival_locked(ts, tick.datetime, tick_type)
+
+            if isinstance(tick, TickSnapshot):
+                ts = tick.ts
+                price = tick.price
+                volume = tick.volume
+                tick_type = tick.tick_type
+                original_tick_type = tick_type  # already normalized by adapter
+                exchange_dt = tick.exchange_dt
+                self.indicators.last_tick_price = price  # minimal side effect for inference path
+            else:
+                ts, price, volume, tick_type, original_tick_type = self._parse_tick_locked(
+                    tick
+                )
+                exchange_dt = getattr(tick, "datetime", None) or (
+                    self._last_tick_exchange_dt or datetime.datetime.fromtimestamp(ts)
+                )
+
+            self._record_tick_arrival_locked(ts, exchange_dt, tick_type)
             self._telemetry.record_atr(self.indicators.current_atr)
             self._maybe_refresh_atr(ts)
             self.indicators.update_vwap(ts, price, volume)
@@ -296,10 +314,17 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
                 if self._resynced_position:
                     self._calibrate_trailing_peak_after_resync(price)
                 self._update_trailing_peak(price)
-            signal = self.process_strategy(ts, price, tick.datetime)
+
+            # Kernel force-flatten (owned by host for hard session boundary safety).
+            # Runs before normal strategy decision so force exit has priority.
+            dt_for_risk = exchange_dt or tick.datetime if not isinstance(tick, TickSnapshot) else exchange_dt
+            signal = self._maybe_kernel_force_flatten(ts, price, dt_for_risk)
+            if signal is None:
+                signal = self.process_strategy(ts, price, dt_for_risk)
+
             if signal is not None:
                 if signal.intent == "entry":
-                    self._pending_intent_cancel_exchange_dt = tick.datetime
+                    self._pending_intent_cancel_exchange_dt = dt_for_risk
                     self._telemetry.record_entry_signal()
                 elif signal.intent == "exit":
                     self._telemetry.record_exit_signal()
@@ -518,9 +543,10 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
             self.contract.code,
         )
         try:
-            import shioaji as sj
-
-            self.api.subscribe(self.contract, quote_type=sj.QuoteType.Tick)
+            if self._resubscribe_ticks is None:
+                logger.warning("No-tick 看門狗 | 未設定 tick 重訂閱 hook，略過")
+                return
+            self._resubscribe_ticks()
             logger.info("No-tick 看門狗 | 重訂閱已送出")
         except Exception as e:
             logger.warning("No-tick 看門狗 | 重訂閱失敗: %s", e)
@@ -638,9 +664,8 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         self.sync_positions()
 
         try:
-            import shioaji as sj
-
-            self.api.subscribe(self.contract, quote_type=sj.QuoteType.Tick)
+            if self._resubscribe_ticks is not None:
+                self._resubscribe_ticks()
         except Exception as e:
             logger.warning("重連後 subscribe 失敗: %s", e)
 
@@ -654,23 +679,9 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
 
         logger.info("重連後狀態同步完成")
 
-    def start(self):
-        import shioaji as sj
-        from shioaji import TickFOPv1
-
-        self.login()
+    def run(self) -> None:
+        """Broker-neutral blocking run loop (login + live wiring must be done first)."""
         self._running = True
-
-        self.api.set_order_callback(self.handle_order_event)
-        self.api.set_event_callback(self.handle_session_event)
-        if hasattr(self.api, "set_session_down_callback"):
-            self.api.set_session_down_callback(self.handle_session_down)
-
-        @self.api.on_tick_fop_v1()
-        def on_fop_tick(tick: TickFOPv1):
-            self.on_tick(tick)
-
-        self.api.subscribe(self.contract, quote_type=sj.QuoteType.Tick)
 
         if self._cfg.tick_archive:
             self._archive.maybe_start_tick_archive(self.contract.code)
@@ -703,4 +714,10 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
                 self._emit_daily_summary(self._trading_date)
             self.api.logout()
             shutdown_async_logging()
+
+    def start(self) -> None:
+        """Live Shioaji convenience entry (delegates to ShioajiLiveBootstrap)."""
+        from trading_engine.adapters.shioaji_live import ShioajiLiveBootstrap
+
+        ShioajiLiveBootstrap(self).start_live()
 

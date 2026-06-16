@@ -53,11 +53,13 @@ def arm_pending_entry(
     order_id: str = "ord-entry-1",
     signal_price: float = 18000.0,
     exchange_ts: int = 1000,
+    qty: int = 1,
 ) -> None:
+    """Arm a pending entry for kernel tests. Phase 1: supports qty."""
     host.is_pending = True
     host.pending_intent = "entry"
     host.pending_order_id = order_id
-    host.pending_qty = 1
+    host.pending_qty = qty
     host.pending_exchange_ts = exchange_ts
     host.pending_signal_price = signal_price
     host.pending_limit_price = signal_price + 3
@@ -71,11 +73,13 @@ def arm_pending_exit(
     signal_price: float = 18020.0,
     exchange_ts: int = 2000,
     exit_reason: str = "take_profit",
+    qty: int = 1,
 ) -> None:
+    """Arm a pending exit for kernel tests. Phase 1: supports qty (for reconstruct)."""
     host.is_pending = True
     host.pending_intent = "exit"
     host.pending_order_id = order_id
-    host.pending_qty = 1
+    host.pending_qty = qty
     host.pending_exchange_ts = exchange_ts
     host.pending_signal_price = signal_price
     host.pending_limit_price = signal_price - 3
@@ -83,4 +87,24 @@ def arm_pending_exit(
     host.pending_exit_reason = exit_reason
 
 
-__all__ = ["StubStrategy", "arm_pending_entry", "arm_pending_exit", "make_host"]
+def make_broker_with_positions(*positions: dict) -> MagicMock:
+    """Create a MagicMock broker whose list_positions returns the given position dicts.
+
+    Each position dict should have keys: code, quantity, direction, price (mimics shioaji position).
+    Useful for sync_positions adversarial tests.
+    """
+    broker = MagicMock()
+    pos_objects = []
+    for p in positions:
+        pos = MagicMock()
+        pos.code = p.get("code", "TXFR1")
+        pos.quantity = int(p.get("quantity", 0))
+        pos.direction = p.get("direction", "Buy")
+        pos.price = float(p.get("price", 18000.0))
+        pos_objects.append(pos)
+    broker.list_positions.return_value = pos_objects
+    broker.futopt_account = MagicMock()
+    return broker
+
+
+__all__ = ["StubStrategy", "arm_pending_entry", "arm_pending_exit", "make_host", "make_broker_with_positions"]

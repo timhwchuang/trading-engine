@@ -27,6 +27,17 @@ from __future__ import annotations
 
 from typing import Any, Callable, Protocol
 
+# Semantic label for tick quote subscription. Shioaji live adapters pass
+# ``shioaji.constant.QuoteType.Tick`` (or ``sj.QuoteType.Tick``) as ``quote_type``
+# to ``subscribe()``; the engine never references broker quote enums directly.
+QUOTE_TYPE_TICK = "tick"
+
+# ``list_positions`` return items should expose (duck-typed):
+#   - code: str
+#   - quantity: int
+#   - direction: str or broker enum (normalize via adapters.position_normalizer)
+#   - price: float (average entry / position price)
+
 
 class BrokerPort(Protocol):
     """Narrow broker surface consumed by TradingEngine and its mixins.
@@ -63,4 +74,4 @@ class BrokerPort(Protocol):
     def list_positions(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-__all__ = ["BrokerPort"]
+__all__ = ["BrokerPort", "QUOTE_TYPE_TICK"]

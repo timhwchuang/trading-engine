@@ -137,7 +137,7 @@ class TestCooldownUsesExchangeTs(unittest.TestCase):
     def test_exit_fill_records_exchange_ts_not_system_clock(self):
         host = make_host()
         exit_ts = 1_700_000_000
-        host.has_position = True
+        host.position_qty = 1
         host.position_dir = "Long"
         host.entry_price = 18000.0
         host.trailing_peak = 18020.0

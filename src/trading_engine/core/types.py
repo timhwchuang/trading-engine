@@ -44,6 +44,7 @@ class PositionSnapshot:
     trailing_peak: float
     entry_exchange_ts: int
     ticks_since_entry: int
+    qty: int = 0
 
 
 @dataclass
@@ -78,3 +79,18 @@ class StrategySideEffects:
     """
 
     block_new_entry: bool = False
+
+
+@dataclass
+class TickSnapshot:
+    """Broker-agnostic normalized tick used internally by the engine.
+
+    Live adapters (e.g. Shioaji) are responsible for converting their native
+    tick objects into this before calling into engine hot paths.
+    """
+
+    ts: int
+    price: float
+    volume: int
+    tick_type: int
+    exchange_dt: datetime.datetime

@@ -26,3 +26,19 @@ build/
 *.swp
 *.swo
 .DS_Store
+
+# Secrets / local config (never commit)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Broker CA / credentials (paths often in .env; ignore cert files if stored in repo tree)
+*.pem
+*.p12
+*.pfx
+*.key
+credentials/
+secrets/
