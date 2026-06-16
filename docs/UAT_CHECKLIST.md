@@ -1,6 +1,8 @@
-# UAT Checklist (consuming app integration)
+# UAT Checklist (kernel / consuming app integration)
 
-Use this in **your app repo** when integrating `trading-engine@v0.2.0` for simulation → paper → small live.
+Use when integrating `trading-engine@v0.2.0` for simulation → paper → small live.
+
+**App deployment** (Windows env, tick archive, reporting): [trading-app `docs/UAT_CHECKLIST.md`](https://github.com/timhwchuang/trading-app/blob/main/docs/UAT_CHECKLIST.md) Phase A/B — run **before** Phase B below.
 
 Prerequisites: [README § Go-Live](../README.md), [LIVE_SAFETY.md](LIVE_SAFETY.md), [STRATEGY.md](STRATEGY.md).
 
