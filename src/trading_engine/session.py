@@ -3,24 +3,18 @@
 from __future__ import annotations
 
 import datetime
-import logging
 import os
-import threading
-import time
-from typing import Any, Optional
 
-from trading_engine.logging_setup import setup_async_logging
+from trading_engine.logging_setup import get_logger
 
-logger = setup_async_logging()
+logger = get_logger()
 
 
 class SessionMixin:
     def _activate_ca(self) -> None:
         """P4-10: 先無 person_id；失敗則以 env / 帳號 person_id 重試。"""
         try:
-            if self.api.activate_ca(
-                ca_path=self._cfg.ca_path, ca_passwd=self._cfg.ca_passwd
-            ):
+            if self.api.activate_ca(ca_path=self._cfg.ca_path, ca_passwd=self._cfg.ca_passwd):
                 logger.info("CA 憑證啟用成功")
                 return
         except Exception as e:
@@ -30,9 +24,7 @@ class SessionMixin:
             self.api.futopt_account, "person_id", None
         )
         if not person_id:
-            raise RuntimeError(
-                "CA 憑證啟用失敗；請設定 SJ_CA_PERSON_ID 或確認券商帳號 person_id"
-            )
+            raise RuntimeError("CA 憑證啟用失敗；請設定 SJ_CA_PERSON_ID 或確認券商帳號 person_id")
 
         if not self.api.activate_ca(
             ca_path=self._cfg.ca_path,
@@ -44,11 +36,10 @@ class SessionMixin:
 
     def _require_futopt_account(self) -> None:
         if self.api.futopt_account is None:
-            raise RuntimeError(
-                "無期貨帳號，請確認帳號已開通期貨並完成簽署"
-            )
+            raise RuntimeError("無期貨帳號，請確認帳號已開通期貨並完成簽署")
 
     def login(self):
+        self._cfg.warn_if_placeholder_credentials(simulation=self._cfg.simulation)
         self.api.login(
             api_key=self._cfg.api_key,
             secret_key=self._cfg.secret_key,
@@ -79,7 +70,7 @@ class SessionMixin:
         *,
         current_atr: float,
         long_lookback_days: int,
-        long_lookback_done_for: Optional[datetime.date],
+        long_lookback_done_for: datetime.date | None,
     ) -> tuple[datetime.date, bool]:
         """P4-9: 開盤/ATR=0 用長 lookback；盤中僅抓當日 K 線。"""
         if current_atr <= 0 or long_lookback_done_for != today:
@@ -101,10 +92,7 @@ class SessionMixin:
             usage.remaining_bytes,
             usage.connections,
         )
-        if (
-            usage.limit_bytes > 0
-            and usage.remaining_bytes < usage.limit_bytes * 0.1
-        ):
+        if usage.limit_bytes > 0 and usage.remaining_bytes < usage.limit_bytes * 0.1:
             logger.warning(
                 "API 流量剩餘 < 10%% | remaining=%s limit=%s",
                 usage.remaining_bytes,
@@ -145,9 +133,7 @@ class SessionMixin:
                 self.entry_price = 0.0
                 self.trailing_peak = 0.0
                 self._clear_entry_tracking()
-                open_positions = [
-                    p for p in positions if int(p.quantity) != 0
-                ]
+                open_positions = [p for p in positions if int(p.quantity) != 0]
                 if open_positions:
                     logger.warning(
                         "券商有 %d 筆持倉，但無法對應合約 %s（%s）",
@@ -165,9 +151,7 @@ class SessionMixin:
             new_dir = "Long" if is_long else "Short"
             had_position = self.position_qty > 0
             same_direction = had_position and self.position_dir == new_dir
-            preserve_peak = (
-                had_position and same_direction and not force_resync
-            )
+            preserve_peak = had_position and same_direction and not force_resync
 
             self.position_qty = int(matched.quantity)
             self.position_dir = new_dir
@@ -200,4 +184,3 @@ class SessionMixin:
         if txf is not None and hasattr(txf, code):
             return getattr(txf, code)
         return self.api.Contracts.Futures[code]
-

@@ -6,8 +6,9 @@ DEPRECATED (standalone hygiene):
     This module will eventually be removed.
 """
 
-from trading_engine.calendar.taifex import *  # noqa: F403
 import warnings as _warnings
+
+from trading_engine.calendar.taifex import *  # noqa: F403
 
 _warnings.warn(
     "trading_engine.exchange_time is deprecated. "

@@ -6,7 +6,6 @@ import datetime
 import unittest
 
 from trading_engine.calendar.taifex import (
-    TAIWAN_TZ,
     exchange_date,
     is_opening_session_window,
     is_trading_session,
@@ -48,7 +47,7 @@ class TestExchangeDate(unittest.TestCase):
         self.assertEqual(exchange_date(_dt(8, 45)), datetime.date(2026, 6, 10))
 
     def test_utc_converts_to_taiwan_date(self):
-        utc = datetime.datetime(2026, 6, 9, 16, 30, tzinfo=datetime.timezone.utc)
+        utc = datetime.datetime(2026, 6, 9, 16, 30, tzinfo=datetime.UTC)
         self.assertEqual(exchange_date(utc), datetime.date(2026, 6, 10))
 
 
@@ -94,9 +93,9 @@ class TestP6Cal1RecentTradingDaySlice(unittest.TestCase):
         day1 = [100.0 + i for i in range(5)]
         day2 = [110.0 + i for i in range(5)]
         all_c = day1 + day2
-        all_ts = [
-            int((d1 + datetime.timedelta(minutes=i)).timestamp() * 1e9) for i in range(5)
-        ] + [int((d2 + datetime.timedelta(minutes=i)).timestamp() * 1e9) for i in range(5)]
+        all_ts = [int((d1 + datetime.timedelta(minutes=i)).timestamp() * 1e9) for i in range(5)] + [
+            int((d2 + datetime.timedelta(minutes=i)).timestamp() * 1e9) for i in range(5)
+        ]
 
         class R:
             ts = all_ts
@@ -116,12 +115,8 @@ class TestP6Cal1RecentTradingDaySlice(unittest.TestCase):
         new = [100.0 + i * 0.7 for i in range(15)]
         closes = prior + new
         tss = [
-            int((d_prior + datetime.timedelta(minutes=i)).timestamp() * 1e9)
-            for i in range(10)
-        ] + [
-            int((d_new + datetime.timedelta(minutes=i)).timestamp() * 1e9)
-            for i in range(15)
-        ]
+            int((d_prior + datetime.timedelta(minutes=i)).timestamp() * 1e9) for i in range(10)
+        ] + [int((d_new + datetime.timedelta(minutes=i)).timestamp() * 1e9) for i in range(15)]
 
         class R2:
             ts = tss

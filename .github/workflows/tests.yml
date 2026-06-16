@@ -7,6 +7,29 @@ on:
     branches: [main]
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package + dev tools
+        run: |
+          python -m pip install -e ".[dev]"
+
+      - name: Ruff lint
+        run: ruff check src tests
+
+      - name: Ruff format check
+        run: ruff format --check src tests
+
+      - name: Mypy (gradual, non-blocking)
+        run: mypy src/trading_engine/core/types.py src/trading_engine/logging_setup.py src/trading_engine/core/runtime_config.py || true
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -24,6 +47,9 @@ jobs:
 
       - name: Install package (editable)
         run: python -m pip install -e .
+
+      - name: No-shioaji core import guard
+        run: python -m unittest tests.test_no_shioaji_core_import -v
 
       - name: Run kernel tests
         run: python run_tests.py

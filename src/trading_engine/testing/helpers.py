@@ -107,4 +107,10 @@ def make_broker_with_positions(*positions: dict) -> MagicMock:
     return broker
 
 
-__all__ = ["StubStrategy", "arm_pending_entry", "arm_pending_exit", "make_host", "make_broker_with_positions"]
+__all__ = [
+    "StubStrategy",
+    "arm_pending_entry",
+    "arm_pending_exit",
+    "make_host",
+    "make_broker_with_positions",
+]

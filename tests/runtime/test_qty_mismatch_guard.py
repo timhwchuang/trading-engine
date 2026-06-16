@@ -24,9 +24,7 @@ class TestQtyMismatchGuard(unittest.TestCase):
             host.handle_order_event(FUTURES_DEAL, msg)
 
             self.assertEqual(host.position_qty, 5)
-            warning_text = " ".join(
-                str(call) for call in mock_log.warning.call_args_list
-            )
+            warning_text = " ".join(str(call) for call in mock_log.warning.call_args_list)
             self.assertIn("超過 pending", warning_text)
 
 

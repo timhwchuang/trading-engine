@@ -75,7 +75,6 @@ class TestNoShioajiCoreImport(unittest.TestCase):
             else:
                 import trading_engine as te  # type: ignore
 
-            from trading_engine import TradingEngine
             from trading_engine.core.types import PositionSnapshot, TickSnapshot
             from trading_engine.testing.helpers import make_host
 

@@ -3,23 +3,51 @@
 from __future__ import annotations
 
 import datetime
-import logging
-import queue
 import threading
-from typing import Any, Optional, Tuple
 
+from trading_engine.core.audit.signal_audit import format_signal_audit
 from trading_engine.core.order_events import is_futures_deal, is_futures_order
 from trading_engine.core.trading_state import PendingIntent
 from trading_engine.core.types import OrderSignal
-
+from trading_engine.logging_setup import get_logger
 from trading_engine.order_errors import OrderErrorCategory, classify_order_error, should_retry_order
-from trading_engine.logging_setup import setup_async_logging
-from trading_engine.core.audit.signal_audit import format_signal_audit
 
-logger = setup_async_logging()
+logger = get_logger()
 
 
 class OrderExecutorMixin:
+    def _validate_order_signal(self, signal: OrderSignal) -> bool:
+        """Reject invalid strategy/kernel signals before arming pending."""
+        if signal.qty <= 0:
+            logger.warning("拒絕 OrderSignal: qty=%s 必須 > 0", signal.qty)
+            return False
+        if signal.intent not in ("entry", "exit"):
+            logger.warning("拒絕 OrderSignal: 非法 intent=%r", signal.intent)
+            return False
+        if signal.action not in ("Buy", "Sell"):
+            logger.warning("拒絕 OrderSignal: 非法 action=%r", signal.action)
+            return False
+        if self.is_pending:
+            logger.warning(
+                "拒絕 OrderSignal: 已有 pending (intent=%s)",
+                self.pending_intent,
+            )
+            return False
+        if signal.intent == "entry":
+            if self.block_new_entry:
+                logger.warning("拒絕 entry OrderSignal: block_new_entry=True")
+                return False
+            if self.position_qty > 0:
+                logger.warning(
+                    "拒絕 entry OrderSignal: 已有持倉 qty=%s",
+                    self.position_qty,
+                )
+                return False
+        if signal.intent == "exit" and self.position_qty <= 0:
+            logger.warning("拒絕 exit OrderSignal: 無持倉")
+            return False
+        return True
+
     def _arm_pending(self, signal: OrderSignal) -> None:
         """P2-2: lock 內同步設 pending，堵住雙 tick 雙單。"""
         self.is_pending = True
@@ -76,9 +104,7 @@ class OrderExecutorMixin:
             self.trailing_peak = min(self.trailing_peak, price)
 
     def is_trading_session(self, dt: datetime.datetime) -> bool:
-        return self._calendar.is_trading_session(
-            dt, self._cfg.session_start, self._cfg.session_end
-        )
+        return self._calendar.is_trading_session(dt, self._cfg.session_start, self._cfg.session_end)
 
     def _maybe_reset_daily_state(self, dt: datetime.datetime) -> None:
         """P0-8: 交易日變更時重置日內風控（日盤 = 日曆日，見 exchange_time）。"""
@@ -109,13 +135,9 @@ class OrderExecutorMixin:
         self._telemetry.snapshot_tick_types(self._tick_type_counts)
         self._telemetry.update_risk_state(self.daily_pnl, self.consecutive_loss)
         summary = self._telemetry.build_summary(trade_date.isoformat())
-        logger.info(
-            "DAILY_SUMMARY %s", self._telemetry.format_daily_summary(summary)
-        )
+        logger.info("DAILY_SUMMARY %s", self._telemetry.format_daily_summary(summary))
 
-    def process_strategy(
-        self, ts: int, price: float, dt: datetime.datetime
-    ) -> Optional[OrderSignal]:
+    def process_strategy(self, ts: int, price: float, dt: datetime.datetime) -> OrderSignal | None:
         self._maybe_reset_daily_state(dt)
         market = self.indicators.snapshot(ts, price, dt)
         vol_threshold = self._vol_threshold(dt)
@@ -126,9 +148,7 @@ class OrderExecutorMixin:
             vol_threshold,
             session_force_flatten_time=self._cfg.session_force_flatten_time,
             max_daily_loss_points=self._cfg.max_daily_loss_points,
-            on_daily_loss_block=lambda: logger.warning(
-                "觸發單日最大虧損，停止新進場"
-            ),
+            on_daily_loss_block=lambda: logger.warning("觸發單日最大虧損，停止新進場"),
         )
         if effects.block_new_entry:
             self.block_new_entry = True
@@ -142,17 +162,15 @@ class OrderExecutorMixin:
         """Backward-compatible alias for ``reset_strategy_state``."""
         self.reset_strategy_state()
 
-    def manage_exit(self, price: float, ts: int) -> Optional[OrderSignal]:
+    def manage_exit(self, price: float, ts: int) -> OrderSignal | None:
         dt = self._last_tick_exchange_dt or datetime.datetime.fromtimestamp(ts)
         market = self.indicators.snapshot(ts, price, dt)
-        signal, _effects = self.strategy.manage_exit(
-            market, self._position_snapshot()
-        )
+        signal, _effects = self.strategy.manage_exit(market, self._position_snapshot())
         return signal
 
     def _maybe_kernel_force_flatten(
         self, ts: int, price: float, dt: datetime.datetime
-    ) -> Optional[OrderSignal]:
+    ) -> OrderSignal | None:
         """Kernel-owned force flatten at session_force_flatten_time.
 
         Strategy may return a custom OrderSignal via session_force_flatten_signal
@@ -242,9 +260,7 @@ class OrderExecutorMixin:
         except Exception as e:
             self._handle_place_order_failure(signal, e)
 
-    def _handle_place_order_failure(
-        self, signal: OrderSignal, exc: Exception
-    ) -> None:
+    def _handle_place_order_failure(self, signal: OrderSignal, exc: Exception) -> None:
         category = classify_order_error(exc)
         intent = signal.intent
         logger.error(
@@ -272,9 +288,7 @@ class OrderExecutorMixin:
         ):
             with self.lock:
                 self._exit_order_retry_count = attempt + 1
-                self._exit_order_retry_at = (
-                    self._clock() + self._cfg.exit_order_retry_delay_sec
-                )
+                self._exit_order_retry_at = self._clock() + self._cfg.exit_order_retry_delay_sec
             logger.warning(
                 "出場下單將退避重試 | attempt=%d/%d delay=%.1fs",
                 attempt + 1,
@@ -294,7 +308,7 @@ class OrderExecutorMixin:
         except Exception as sync_err:
             logger.error("出場失敗後對帳異常: %s", sync_err)
 
-    def _reconstruct_pending_signal(self) -> Optional[OrderSignal]:
+    def _reconstruct_pending_signal(self) -> OrderSignal | None:
         with self.lock:
             if not self.is_pending or self.pending_intent != "exit":
                 return None
@@ -379,7 +393,7 @@ class OrderExecutorMixin:
         if needs_sync:
             self.sync_positions()
 
-    def _event_order_id(self, msg: dict) -> Optional[str]:
+    def _event_order_id(self, msg: dict) -> str | None:
         trade_id = msg.get("trade_id")
         if trade_id:
             return str(trade_id)
@@ -479,9 +493,7 @@ class OrderExecutorMixin:
         is_buy = self._is_buy_action(action)
         return self._apply_deal_fill(price, is_buy, deal_qty=qty)
 
-    def _apply_deal_fill(
-        self, price: float, is_buy: bool, deal_qty: int = 1
-    ) -> bool:
+    def _apply_deal_fill(self, price: float, is_buy: bool, deal_qty: int = 1) -> bool:
         """套用成交。回傳 True 表示須在 lock 外呼叫 sync_positions()。"""
         expected = self.pending_qty if self.pending_qty > 0 else 1
         if deal_qty > expected:
@@ -621,7 +633,7 @@ class OrderExecutorMixin:
         name = getattr(action, "name", None)
         return name == "Buy"
 
-    def _extract_fill_from_trade(self, trade) -> Optional[Tuple[float, bool]]:
+    def _extract_fill_from_trade(self, trade) -> tuple[float, bool] | None:
         deals = getattr(trade.status, "deals", None) or []
         if deals:
             deal = deals[-1]
@@ -736,4 +748,3 @@ class OrderExecutorMixin:
             logger.error("Pending 超時後對帳失敗: %s", e)
         with self.lock:
             self.block_new_entry = True
-

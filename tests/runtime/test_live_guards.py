@@ -65,9 +65,7 @@ class TestLiveGuards(unittest.TestCase):
         host.api.place_order.side_effect = TimeoutError("timeout")
         arm_pending_exit(host)
 
-        host.place_order(
-            OrderSignal("Sell", 1, 18000.0, "exit", exchange_ts=200)
-        )
+        host.place_order(OrderSignal("Sell", 1, 18000.0, "exit", exchange_ts=200))
         self.assertTrue(host.is_pending)
         self.assertGreater(host._exit_order_retry_at, 0)
 

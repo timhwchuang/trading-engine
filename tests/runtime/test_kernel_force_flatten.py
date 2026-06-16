@@ -7,8 +7,7 @@ import unittest
 from unittest.mock import MagicMock
 
 from trading_engine.core.strategy import BaseStrategy, StrategySideEffects
-from trading_engine.core.types import OrderSignal, PositionSnapshot
-from trading_engine.testing.defaults import default_runtime_config
+from trading_engine.core.types import OrderSignal
 from trading_engine.testing.helpers import make_host
 
 
@@ -31,9 +30,7 @@ class _ForceSpyStrategy(BaseStrategy):
     def reset(self) -> None:
         return None
 
-    def session_force_flatten_signal(
-        self, market, position, session_force_flatten_time
-    ):
+    def session_force_flatten_signal(self, market, position, session_force_flatten_time):
         self.force_calls += 1
         self.last_market = market
         if self.custom_signal is not None:
@@ -65,7 +62,9 @@ class TestKernelForceFlatten(unittest.TestCase):
         host.position_dir = "Short"
         host.entry_price = 18100.0
 
-        custom = OrderSignal("Buy", 1, 18090.0, "exit", exchange_ts=1_700_000_200, slippage_points=5)
+        custom = OrderSignal(
+            "Buy", 1, 18090.0, "exit", exchange_ts=1_700_000_200, slippage_points=5
+        )
         spy.custom_signal = custom
 
         sig = host._maybe_kernel_force_flatten(1_700_000_200, 18095.0, _dt_force())

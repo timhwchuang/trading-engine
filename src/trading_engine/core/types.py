@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import dataclass
-from typing import Optional
 
 from trading_engine.core.audit.signal_audit import SignalAudit
 
@@ -16,8 +15,8 @@ class OrderSignal:
     ref_price: float
     intent: str  # "entry" | "exit"
     exchange_ts: int = 0
-    audit: Optional[SignalAudit] = None
-    slippage_points: Optional[int] = None
+    audit: SignalAudit | None = None
+    slippage_points: int | None = None
 
 
 @dataclass
@@ -69,6 +68,31 @@ class RiskGate:
     daily_pnl: float
     after_flatten_time: bool
     force_flatten: bool
+
+
+@dataclass(frozen=True)
+class EngineStateSnapshot:
+    """Read-only view of TradingEngine runtime state.
+
+    Obtain via ``TradingEngine.get_state_snapshot()``.
+    Do **not** mutate ``TradingEngine`` attributes directly.
+    """
+
+    position_qty: int
+    position_dir: str
+    entry_price: float
+    is_pending: bool
+    pending_intent: str | None
+    exit_pending: bool
+    pending_qty: int
+    filled_qty: int
+    daily_pnl: float
+    consecutive_loss: int
+    block_new_entry: bool
+    api_connected: bool
+    has_position: bool
+    trailing_peak: float
+    ticks_since_entry: int
 
 
 @dataclass

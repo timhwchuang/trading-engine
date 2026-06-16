@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 import logging
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from trading_engine.core.runtime_config import RuntimeConfig
 
@@ -43,9 +43,7 @@ class NullArchivePort:
     def shutdown_tick_archive(self) -> None:
         return None
 
-    def archive_kbars(
-        self, kbars: Any, *, product_code: str, trade_date: datetime.date
-    ) -> None:
+    def archive_kbars(self, kbars: Any, *, product_code: str, trade_date: datetime.date) -> None:
         return None
 
 
@@ -54,7 +52,7 @@ class TrendRefreshPort(Protocol):
         self,
         kbars: Any,
         *,
-        exchange_dt: Optional[datetime.datetime],
+        exchange_dt: datetime.datetime | None,
         used_long_lookback: bool,
         atr: float,
         cfg: RuntimeConfig,
@@ -66,7 +64,7 @@ class NullTrendRefreshPort:
         self,
         kbars: Any,
         *,
-        exchange_dt: Optional[datetime.datetime],
+        exchange_dt: datetime.datetime | None,
         used_long_lookback: bool,
         atr: float,
         cfg: RuntimeConfig,
@@ -75,7 +73,7 @@ class NullTrendRefreshPort:
 
 
 class NullTelemetryPort:
-    """Minimal telemetry for tests / backtest without theman observability."""
+    """Minimal telemetry for tests / backtest without app-layer observability."""
 
     def record_lock_wait(self, ms: float) -> None:
         return None
@@ -127,9 +125,7 @@ class NullTelemetryPort:
             return json.dumps(asdict(audit), ensure_ascii=False, separators=(",", ":"))
         return json.dumps(audit, ensure_ascii=False, separators=(",", ":"))
 
-    def compute_limit_price(
-        self, signal_price: float, *, is_buy: bool, ioc_slippage: int
-    ) -> float:
+    def compute_limit_price(self, signal_price: float, *, is_buy: bool, ioc_slippage: int) -> float:
         if is_buy:
             return signal_price + ioc_slippage
         return signal_price - ioc_slippage

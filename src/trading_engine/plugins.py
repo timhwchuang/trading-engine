@@ -27,9 +27,7 @@ def load_strategy(name: str, **kwargs: Any):
             factory = ep.load()
             return factory(**kwargs)
     available = ", ".join(sorted(ep.name for ep in eps)) or "(none)"
-    raise LookupError(
-        f"Unknown strategy plugin {name!r}. Available: {available}"
-    )
+    raise LookupError(f"Unknown strategy plugin {name!r}. Available: {available}")
 
 
 __all__ = ["ENTRY_POINT_GROUP", "load_strategy"]

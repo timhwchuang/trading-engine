@@ -8,7 +8,6 @@ invalid combinations during development and adversarial testing.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Optional
 
 
 class PendingIntent(StrEnum):
@@ -21,7 +20,7 @@ class PendingIntent(StrEnum):
 def validate_pending_consistency(
     *,
     is_pending: bool,
-    pending_intent: Optional[str],
+    pending_intent: str | None,
     exit_pending: bool,
     position_qty: int,
     position_dir: str,

@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import datetime
 from abc import ABC, abstractmethod
-from typing import Callable, Optional, Protocol
+from collections.abc import Callable
+from typing import Protocol
 
 from trading_engine.core.audit.signal_audit import SignalAudit
 from trading_engine.core.types import (
@@ -42,7 +43,7 @@ class Strategy(Protocol):
         session_force_flatten_time: datetime.time,
         max_daily_loss_points: float,
         on_daily_loss_block: Callable[[], None] | None = None,
-    ) -> tuple[Optional[OrderSignal], StrategySideEffects]:
+    ) -> tuple[OrderSignal | None, StrategySideEffects]:
         """Core decision point. Returns (signal_or_None, side_effects)."""
         ...
 
@@ -52,8 +53,7 @@ class Strategy(Protocol):
 
     def manage_exit(
         self, market: MarketSnapshot, position: PositionSnapshot
-    ) -> tuple[Optional[OrderSignal], StrategySideEffects]:
-        ...
+    ) -> tuple[OrderSignal | None, StrategySideEffects]: ...
 
     def build_entry_audit(
         self,
@@ -61,8 +61,7 @@ class Strategy(Protocol):
         direction: str,
         multiplier: float,
         vol_threshold: float,
-    ) -> SignalAudit:
-        ...
+    ) -> SignalAudit: ...
 
     def build_exit_audit(
         self,
@@ -71,16 +70,14 @@ class Strategy(Protocol):
         reason: str,
         *,
         trail_points_used: float = 0.0,
-    ) -> SignalAudit:
-        ...
+    ) -> SignalAudit: ...
 
     def session_force_flatten_signal(
         self,
         market: MarketSnapshot,
         position: PositionSnapshot,
         session_force_flatten_time: datetime.time,
-    ) -> tuple[Optional[OrderSignal], StrategySideEffects]:
-        ...
+    ) -> tuple[OrderSignal | None, StrategySideEffects]: ...
 
 
 class BaseStrategy(ABC):
@@ -97,8 +94,7 @@ class BaseStrategy(ABC):
         session_force_flatten_time: datetime.time,
         max_daily_loss_points: float,
         on_daily_loss_block: Callable[[], None] | None = None,
-    ) -> tuple[Optional[OrderSignal], StrategySideEffects]:
-        ...
+    ) -> tuple[OrderSignal | None, StrategySideEffects]: ...
 
     def reset(self) -> None:
         """Reset strategy-local state. Override in plugins as needed."""
@@ -106,7 +102,7 @@ class BaseStrategy(ABC):
 
     def manage_exit(
         self, market: MarketSnapshot, position: PositionSnapshot
-    ) -> tuple[Optional[OrderSignal], StrategySideEffects]:
+    ) -> tuple[OrderSignal | None, StrategySideEffects]:
         return None, StrategySideEffects()
 
     def build_entry_audit(
@@ -147,7 +143,7 @@ class BaseStrategy(ABC):
         market: MarketSnapshot,
         position: PositionSnapshot,
         session_force_flatten_time: datetime.time,
-    ) -> tuple[Optional[OrderSignal], StrategySideEffects]:
+    ) -> tuple[OrderSignal | None, StrategySideEffects]:
         return None, StrategySideEffects()
 
 

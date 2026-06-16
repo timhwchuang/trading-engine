@@ -18,21 +18,21 @@ See also: [SPEC.md](../SPEC.md), [README.md](../README.md)
 
 ## State Dimensions (single source of truth)
 
-| Dimension            | Legal values                  | Invariant / Notes |
-|----------------------|-------------------------------|-------------------|
-| `position_qty`       | `int >= 0`                    | 0 means Flat. Primary accounting field (Phase 1+). |
-| `position_dir`       | `"Flat" \| "Long" \| "Short"` | Must be `"Flat"` exactly when `position_qty == 0`. |
-| `is_pending`         | `bool`                        | True while an order (entry or exit) is in flight. |
-| `pending_intent`     | `"entry" \| "exit" \| None`   | Must be set when `is_pending`. |
-| `exit_pending`       | `bool`                        | Refinement of pending for exits (used for guards). |
-| `pending_order_id`   | `str \| None`                 | Used for strict callback + reconcile matching. |
-| `filled_qty`         | `int` (accumulated for current pending) | For IOC partial handling; only cleared on full completion or cancel. |
+| Dimension          | Legal values                            | Invariant / Notes                                                    |
+| ------------------ | --------------------------------------- | -------------------------------------------------------------------- |
+| `position_qty`     | `int >= 0`                              | 0 means Flat. Primary accounting field (Phase 1+).                   |
+| `position_dir`     | `"Flat" \| "Long" \| "Short"`           | Must be `"Flat"` exactly when `position_qty == 0`.                   |
+| `is_pending`       | `bool`                                  | True while an order (entry or exit) is in flight.                    |
+| `pending_intent`   | `"entry" \| "exit" \| None`             | Must be set when `is_pending`.                                       |
+| `exit_pending`     | `bool`                                  | Refinement of pending for exits (used for guards).                   |
+| `pending_order_id` | `str \| None`                           | Used for strict callback + reconcile matching.                       |
+| `filled_qty`       | `int` (accumulated for current pending) | For IOC partial handling; only cleared on full completion or cancel. |
 
 `has_position` is a **derived** `@property` → `position_qty > 0` (prevents drift).
 
 ## Key Kernel Invariants (guaranteed by the host)
 
-1. While `is_pending`, no new entry signal from strategy will arm another order (the `_arm_pending` under lock + risk gate `is_pending` blocks it).
+1. While `is_pending`, no new order will arm: `_validate_order_signal` hard-rejects any signal when pending; strategy should also respect `RiskGate.is_pending`.
 2. After `session_force_flatten_time`, if `position_qty > 0` and not already exiting, **the kernel itself** produces an exit `OrderSignal` (Phase 2). Strategy may customize via `session_force_flatten_signal`.
 3. `position_qty` is only mutated by:
    - `sync_positions` (from broker list_positions)
@@ -100,3 +100,23 @@ PositionSnapshot gained `qty: int = 0` (additive, defaulted). Callers using keyw
 ---
 
 **This design favors explicit invariants + narrow mutation paths over a monolithic StateMachine object (keeps the runtime tiny and backtest-friendly).**
+
+## Position model limitations
+
+This kernel is **not** a general position manager:
+
+- Single direction at a time (`Long` / `Short` / `Flat`)
+- Full entry and full exit only (`position_qty` → 0 on exit fill)
+- `sync_positions` uses the **first** matching non-zero broker position
+- No scale-in, partial exit, or multi-leg netting
+
+Designed for ~1-lot TAIFEX day-session strategies. See [SPEC.md §4.2.1](../SPEC.md) and [LIVE_SAFETY.md](LIVE_SAFETY.md).
+
+## State observation (do not mutate)
+
+`TradingEngine` exposes mutable attributes for kernel simplicity. **External code must not assign to them.** Use `get_state_snapshot()` for read-only telemetry. Direct mutation bypasses invariants and is undefined behavior.
+
+## See also
+
+- [LIVE_SAFETY.md](LIVE_SAFETY.md) — failure scenarios and operator actions
+- [STRATEGY.md](STRATEGY.md) — strategy author rules

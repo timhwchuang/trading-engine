@@ -1,29 +1,15 @@
 from __future__ import annotations
 
-import atexit
-import os
-import time
 import datetime
-import logging
-import logging.handlers
 import queue
-import sys
-from collections import deque
 import threading
-from typing import Any, Callable, Deque, List, Optional, Tuple
+import time
+from collections.abc import Callable
+from typing import Any
 
-from trading_engine.core.ports import BrokerPort
-from trading_engine.core.types import OrderSignal, TickSnapshot
 from trading_engine.calendar.port import MarketCalendarPort, TaifexMarketCalendar
-from trading_engine.core.audit.signal_audit import SignalAudit, format_signal_audit
-from trading_engine.order_errors import (
-    OrderErrorCategory,
-    classify_order_error,
-    should_retry_order,
-)
-from trading_engine.indicators import IndicatorState
-from trading_engine.core.strategy import Strategy
-from trading_engine.core.types import PositionSnapshot, RiskGate
+from trading_engine.core.audit.signal_audit import SignalAudit
+from trading_engine.core.ports import BrokerPort
 from trading_engine.core.runtime_config import RuntimeConfig
 from trading_engine.core.side_effect_ports import (
     AlertPort,
@@ -35,13 +21,20 @@ from trading_engine.core.side_effect_ports import (
     TelemetryPort,
     TrendRefreshPort,
 )
-
-from trading_engine.logging_setup import setup_async_logging, shutdown_async_logging
-
-logger = setup_async_logging()
-
+from trading_engine.core.strategy import Strategy
+from trading_engine.core.types import (
+    EngineStateSnapshot,
+    OrderSignal,
+    PositionSnapshot,
+    RiskGate,
+    TickSnapshot,
+)
+from trading_engine.indicators import IndicatorState
+from trading_engine.logging_setup import get_logger, shutdown_async_logging
 from trading_engine.order_executor import OrderExecutorMixin
 from trading_engine.session import SessionMixin
+
+logger = get_logger()
 
 
 class TradingEngine(OrderExecutorMixin, SessionMixin):
@@ -73,7 +66,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         self.api = api
         self._order_adapter = order_adapter
         # Optional hook set by live bootstrap (e.g. ShioajiLiveBootstrap.subscribe_tick).
-        self._resubscribe_ticks: Optional[Callable[[], None]] = None
+        self._resubscribe_ticks: Callable[[], None] | None = None
         # 注入式時鐘：實盤預設 time.time()；回測傳入 tick 時間驅動的時鐘以確保確定性。
         self._clock = clock if clock is not None else time.time
         if strategy is None:
@@ -81,7 +74,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
 
         # 持倉狀態（Phase 1: position_qty 為單一事實來源；has_position 為 derived property）
         self.position_qty = 0
-        self.position_dir = "Flat"          # Long / Short / Flat
+        self.position_dir = "Flat"  # Long / Short / Flat
         self.entry_price = 0.0
         self.entry_exchange_ts = 0
         self.ticks_since_entry = 0
@@ -90,30 +83,30 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         self.daily_pnl = 0.0
         self.consecutive_loss = 0
         self.block_new_entry = False
-        self._trading_date: Optional[datetime.date] = None
+        self._trading_date: datetime.date | None = None
 
         # 下單狀態
         self.is_pending = False
-        self.pending_intent: Optional[str] = None
+        self.pending_intent: str | None = None
         self.exit_pending = False
         self.pending_trade = None
-        self.pending_order_id: Optional[str] = None
-        self.pending_since = 0.0          # system time; relative pending timeout only
+        self.pending_order_id: str | None = None
+        self.pending_since = 0.0  # system time; relative pending timeout only
         self.pending_exchange_ts = 0
         self.pending_qty = 0
         self.pending_signal_price = 0.0
         self.pending_limit_price = 0.0
         self.pending_exit_reason = ""
         self.pending_ioc_slippage = self._cfg.ioc_slippage_points
-        self.filled_qty = 0               # P2-1: 累計部分成交；IOC 結束前不全解鎖；多口管理前置（Mock+單測）
-        self._resynced_position = False   # sync_positions 後待首 tick 校準 trailing_peak
+        self.filled_qty = 0  # P2-1: 累計部分成交；IOC 結束前不全解鎖；多口管理前置（Mock+單測）
+        self._resynced_position = False  # sync_positions 後待首 tick 校準 trailing_peak
         self._api_connected = True
         self._disconnect_since = 0.0
         self._session_relogin_attempts = 0
         self._next_relogin_at = 0.0
         self._exit_order_retry_count = 0
         self._exit_order_retry_at = 0.0
-        self._pending_action: Optional[str] = None
+        self._pending_action: str | None = None
 
         self.indicators = IndicatorState(
             vwap_window_min=self._cfg.vwap_window_min,
@@ -127,14 +120,14 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         self._raw_order_evt_dumped: set = set()
         self.last_tick_exchange_ts = 0
         self._last_tick_wall_time = 0.0
-        self._last_tick_exchange_dt: Optional[datetime.datetime] = None
+        self._last_tick_exchange_dt: datetime.datetime | None = None
         self._tick_type_counts = {0: 0, 1: 0, 2: 0}
         self._tick_type_inferred_counts = {1: 0, 2: 0}
         self._last_tick_type_log_wall = 0.0
         self._last_clock_skew_warn_wall = 0.0
         self._last_no_tick_resubscribe_wall = 0.0
-        self._pending_intent_cancel_exchange_dt: Optional[datetime.datetime] = None
-        self._order_queue: queue.Queue[Optional[OrderSignal]] = queue.Queue()
+        self._pending_intent_cancel_exchange_dt: datetime.datetime | None = None
+        self._order_queue: queue.Queue[OrderSignal | None] = queue.Queue()
         self._order_sync_mode = False
         self._order_worker_started = False
 
@@ -201,9 +194,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         vol_threshold = self._vol_threshold(dt)
         market = self.indicators.snapshot(ts, price, dt)
         base_vol, multiplier, threshold = vol_threshold
-        return self.strategy.build_entry_audit(
-            market, direction, multiplier, threshold
-        )
+        return self.strategy.build_entry_audit(market, direction, multiplier, threshold)
 
     def build_exit_audit(
         self,
@@ -231,6 +222,32 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
             qty=self.position_qty,
         )
 
+    def get_state_snapshot(self) -> EngineStateSnapshot:
+        """Return a frozen read-only view of engine state.
+
+        **Do not** assign to ``TradingEngine`` attributes (``position_qty``,
+        ``is_pending``, etc.) from telemetry, strategy, or app code — that
+        bypasses kernel invariants.
+        """
+        with self.lock:
+            return EngineStateSnapshot(
+                position_qty=self.position_qty,
+                position_dir=self.position_dir,
+                entry_price=self.entry_price,
+                is_pending=self.is_pending,
+                pending_intent=self.pending_intent,
+                exit_pending=self.exit_pending,
+                pending_qty=self.pending_qty,
+                filled_qty=self.filled_qty,
+                daily_pnl=self.daily_pnl,
+                consecutive_loss=self.consecutive_loss,
+                block_new_entry=self.block_new_entry,
+                api_connected=self._api_connected,
+                has_position=self.has_position,
+                trailing_peak=self.trailing_peak,
+                ticks_since_entry=self.ticks_since_entry,
+            )
+
     def _risk_gate(self, ts: int, dt: datetime.datetime) -> RiskGate:
         return RiskGate(
             api_connected=self._api_connected,
@@ -241,17 +258,11 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
             block_new_entry=self.block_new_entry,
             consecutive_loss=self.consecutive_loss,
             daily_pnl=self.daily_pnl,
-            after_flatten_time=self._calendar.is_at_or_after(
-                dt, self._cfg.session_flatten_time
-            ),
-            force_flatten=self._calendar.is_at_or_after(
-                dt, self._cfg.session_force_flatten_time
-            ),
+            after_flatten_time=self._calendar.is_at_or_after(dt, self._cfg.session_flatten_time),
+            force_flatten=self._calendar.is_at_or_after(dt, self._cfg.session_force_flatten_time),
         )
 
-    def _parse_tick_locked(
-        self, tick: Any
-    ) -> Tuple[int, float, int, int, int]:
+    def _parse_tick_locked(self, tick: Any) -> tuple[int, float, int, int, int]:
         """Parse tick inside lock; infer buy/sell from price when type0."""
         ts = int(tick.datetime.timestamp())
         price = float(tick.close)
@@ -277,7 +288,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         """Accept either native broker tick (e.g. Shioaji TickFOPv1 via live adapter)
         or a TickSnapshot (preferred internal normalized form for decoupling).
         """
-        signal: Optional[OrderSignal] = None
+        signal: OrderSignal | None = None
         ts = 0
         price = 0.0
         volume = 0
@@ -297,9 +308,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
                 exchange_dt = tick.exchange_dt
                 self.indicators.last_tick_price = price  # minimal side effect for inference path
             else:
-                ts, price, volume, tick_type, original_tick_type = self._parse_tick_locked(
-                    tick
-                )
+                ts, price, volume, tick_type, original_tick_type = self._parse_tick_locked(tick)
                 exchange_dt = getattr(tick, "datetime", None) or (
                     self._last_tick_exchange_dt or datetime.datetime.fromtimestamp(ts)
                 )
@@ -317,19 +326,24 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
 
             # Kernel force-flatten (owned by host for hard session boundary safety).
             # Runs before normal strategy decision so force exit has priority.
-            dt_for_risk = exchange_dt or tick.datetime if not isinstance(tick, TickSnapshot) else exchange_dt
+            dt_for_risk = (
+                exchange_dt or tick.datetime if not isinstance(tick, TickSnapshot) else exchange_dt
+            )
             signal = self._maybe_kernel_force_flatten(ts, price, dt_for_risk)
             if signal is None:
                 signal = self.process_strategy(ts, price, dt_for_risk)
 
             if signal is not None:
-                if signal.intent == "entry":
-                    self._pending_intent_cancel_exchange_dt = dt_for_risk
-                    self._telemetry.record_entry_signal()
-                elif signal.intent == "exit":
-                    self._telemetry.record_exit_signal()
-                self._arm_pending(signal)
-                self._log_signal_audit(signal)
+                if not self._validate_order_signal(signal):
+                    signal = None
+                else:
+                    if signal.intent == "entry":
+                        self._pending_intent_cancel_exchange_dt = dt_for_risk
+                        self._telemetry.record_entry_signal()
+                    elif signal.intent == "exit":
+                        self._telemetry.record_exit_signal()
+                    self._arm_pending(signal)
+                    self._log_signal_audit(signal)
 
         self._archive.enqueue_tick(tick, tick_type)
 
@@ -373,9 +387,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
                 start=start.isoformat(),
                 end=today.isoformat(),
             )
-            atr = IndicatorState.compute_atr(
-                kbars, atr_period=self._cfg.atr_period
-            )
+            atr = IndicatorState.compute_atr(kbars, atr_period=self._cfg.atr_period)
             # live_get reads sweep-patched config module attributes at runtime.
             _live_trend_enabled = self._cfg.live_get(
                 "TREND_FILTER_ENABLED", self._cfg.trend_filter_enabled
@@ -398,11 +410,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
                 self.indicators.trend_strength = trend_strength
                 if used_long:
                     self.indicators._atr_long_lookback_date = today
-            lookback_label = (
-                f"{self._cfg.atr_kline_lookback_days}d"
-                if used_long
-                else "當日"
-            )
+            lookback_label = f"{self._cfg.atr_kline_lookback_days}d" if used_long else "當日"
             logger.info(
                 "ATR(%d) 更新: %.2f | start=%s lookback=%s",
                 self._cfg.atr_period,
@@ -463,9 +471,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         self._tick_type_counts[bucket] = self._tick_type_counts.get(bucket, 0) + 1
         self._maybe_warn_clock_skew(ts)
 
-    def _record_tick_arrival(
-        self, ts: int, exchange_dt: datetime.datetime, tick_type: int
-    ) -> None:
+    def _record_tick_arrival(self, ts: int, exchange_dt: datetime.datetime, tick_type: int) -> None:
         self.last_tick_exchange_ts = ts
         self._last_tick_wall_time = self._clock()
         self._last_tick_exchange_dt = exchange_dt
@@ -634,9 +640,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         self._exit_order_retry_count = 0
         self._exit_order_retry_at = 0.0
 
-    def handle_session_event(
-        self, resp_code: int, event_code: int, info: str, event: str
-    ):
+    def handle_session_event(self, resp_code: int, event_code: int, info: str, event: str):
         if event_code == 12:
             logger.warning("API 重連中 | resp=%s info=%s", resp_code, info)
             self._mark_disconnected()
@@ -720,4 +724,3 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         from trading_engine.adapters.shioaji_live import ShioajiLiveBootstrap
 
         ShioajiLiveBootstrap(self).start_live()
-

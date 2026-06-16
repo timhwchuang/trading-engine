@@ -28,10 +28,10 @@ class ShioajiLiveBootstrap:
         bootstrap.start_live()
     """
 
-    def __init__(self, engine: "TradingEngine") -> None:
+    def __init__(self, engine: TradingEngine) -> None:
         self.engine = engine
 
-    def tick_to_snapshot(self, tick: "TickFOPv1") -> TickSnapshot:
+    def tick_to_snapshot(self, tick: TickFOPv1) -> TickSnapshot:
         """Convert Shioaji TickFOPv1 into engine-native TickSnapshot."""
         ts = int(tick.datetime.timestamp())
         price = float(tick.close)
@@ -45,7 +45,7 @@ class ShioajiLiveBootstrap:
             exchange_dt=tick.datetime,
         )
 
-    def on_tick_from_shioaji(self, tick: "TickFOPv1") -> None:
+    def on_tick_from_shioaji(self, tick: TickFOPv1) -> None:
         """Preferred entry point from live quote callback."""
         self.engine.on_tick(self.tick_to_snapshot(tick))
 
@@ -53,9 +53,7 @@ class ShioajiLiveBootstrap:
         import shioaji as sj
 
         if self.engine.contract is not None:
-            self.engine.api.subscribe(
-                self.engine.contract, quote_type=sj.QuoteType.Tick
-            )
+            self.engine.api.subscribe(self.engine.contract, quote_type=sj.QuoteType.Tick)
 
     def attach(self) -> None:
         """Register broker-neutral hooks on the engine (resubscribe, etc.)."""
@@ -68,7 +66,7 @@ class ShioajiLiveBootstrap:
             self.engine.api.set_session_down_callback(self.engine.handle_session_down)
 
         @self.engine.api.on_tick_fop_v1()
-        def _on_tick(tick: "TickFOPv1"):
+        def _on_tick(tick: TickFOPv1):
             self.on_tick_from_shioaji(tick)
 
     def wire_live(self) -> None:

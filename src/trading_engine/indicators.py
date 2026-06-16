@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime
 from collections import deque
-from typing import Deque, Tuple
 
 from trading_engine.core.types import MarketSnapshot
 
@@ -18,12 +17,12 @@ class IndicatorState:
     ) -> None:
         self._vwap_window_min = vwap_window_min
         self._atr_period = atr_period
-        self.vwap_window: Deque[Tuple[int, float, int]] = deque()
+        self.vwap_window: deque[tuple[int, float, int]] = deque()
         self.vwap_sum_pv = 0.0
         self.vwap_sum_vol = 0
         self.current_vwap = 0.0
 
-        self.momentum_window: Deque[Tuple[int, int, int]] = deque()
+        self.momentum_window: deque[tuple[int, int, int]] = deque()
         self.vol_1s = 0
         self.buy_vol_1s = 0
         self.sell_vol_1s = 0
@@ -46,9 +45,7 @@ class IndicatorState:
             self.vwap_sum_pv -= old_p * old_v
             self.vwap_sum_vol -= old_v
 
-        self.current_vwap = (
-            self.vwap_sum_pv / self.vwap_sum_vol if self.vwap_sum_vol > 0 else price
-        )
+        self.current_vwap = self.vwap_sum_pv / self.vwap_sum_vol if self.vwap_sum_vol > 0 else price
 
     def update_momentum(self, ts: int, volume: int, tick_type: int) -> None:
         self.momentum_window.append((ts, volume, tick_type))
@@ -68,9 +65,7 @@ class IndicatorState:
             elif old_type == 2:
                 self.sell_vol_1s -= old_v
 
-    def snapshot(
-        self, ts: int, price: float, dt: datetime.datetime
-    ) -> MarketSnapshot:
+    def snapshot(self, ts: int, price: float, dt: datetime.datetime) -> MarketSnapshot:
         return MarketSnapshot(
             ts=ts,
             price=price,

@@ -20,18 +20,12 @@ class TestSessionFlattenTimes(unittest.TestCase):
         self.s = default_test_settings()
 
     def test_entry_blocked_from_flatten_time(self):
-        self.assertFalse(
-            is_at_or_after(_dt(13, 39, 59), self.s.session_flatten_time)
-        )
+        self.assertFalse(is_at_or_after(_dt(13, 39, 59), self.s.session_flatten_time))
         self.assertTrue(is_at_or_after(_dt(13, 40, 0), self.s.session_flatten_time))
 
     def test_force_flatten_from_1344(self):
-        self.assertFalse(
-            is_at_or_after(_dt(13, 43, 59), self.s.session_force_flatten_time)
-        )
-        self.assertTrue(
-            is_at_or_after(_dt(13, 44, 0), self.s.session_force_flatten_time)
-        )
+        self.assertFalse(is_at_or_after(_dt(13, 43, 59), self.s.session_force_flatten_time))
+        self.assertTrue(is_at_or_after(_dt(13, 44, 0), self.s.session_force_flatten_time))
 
 
 class TestSignalAudit(unittest.TestCase):

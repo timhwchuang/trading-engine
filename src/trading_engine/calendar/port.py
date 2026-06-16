@@ -18,9 +18,7 @@ class MarketCalendarPort(Protocol):
         session_end: datetime.time,
     ) -> bool: ...
 
-    def is_at_or_after(
-        self, dt: datetime.datetime, cutoff: datetime.time
-    ) -> bool: ...
+    def is_at_or_after(self, dt: datetime.datetime, cutoff: datetime.time) -> bool: ...
 
     def is_opening_session_window(self, dt: datetime.datetime) -> bool: ...
 
@@ -59,9 +57,7 @@ class TaifexMarketCalendar:
     ) -> bool:
         return taifex.is_trading_session(dt, session_start, session_end)
 
-    def is_at_or_after(
-        self, dt: datetime.datetime, cutoff: datetime.time
-    ) -> bool:
+    def is_at_or_after(self, dt: datetime.datetime, cutoff: datetime.time) -> bool:
         return taifex.is_at_or_after(dt, cutoff)
 
     def is_opening_session_window(self, dt: datetime.datetime) -> bool:
@@ -95,9 +91,7 @@ class TaifexMarketCalendar:
         *,
         max_days: int = 2,
     ) -> list[float]:
-        return taifex.select_recent_trading_days_closes(
-            raw_kbars, reference_dt, max_days=max_days
-        )
+        return taifex.select_recent_trading_days_closes(raw_kbars, reference_dt, max_days=max_days)
 
 
 __all__ = ["MarketCalendarPort", "TaifexMarketCalendar"]

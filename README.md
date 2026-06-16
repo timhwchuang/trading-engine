@@ -11,12 +11,48 @@
 |------|------|
 | [SPEC.md](SPEC.md) | 模組邊界、依賴方向、公開 API |
 | [docs/DESIGN.md](docs/DESIGN.md) | 狀態維度、不變量、transition 規則 |
+| [docs/STRATEGY.md](docs/STRATEGY.md) | Strategy Protocol、MUST/MUST NOT |
+| [docs/LIVE_SAFETY.md](docs/LIVE_SAFETY.md) | 實盤失敗情境與 kernel 行為 |
+| [docs/UAT_CHECKLIST.md](docs/UAT_CHECKLIST.md) | Consuming app 整合 UAT 驗收表 |
+| [CHANGELOG.md](CHANGELOG.md) | 版本變更紀錄 |
+
+## Disclaimer
+
+**本專案為作者個人研究與學習用途而公開，部分程式與文件在開發過程中借助 AI 協作撰寫與整理。**
+
+本 repo 僅提供期貨執行狀態機的技術實作參考，**不構成**投資建議、交易邀約或獲利保證，作者亦無意提供商業級交易服務。
+
+若你將本專案用於模擬交易以外的**實盤操作**，所有決策、參數設定、資金配置，以及因此產生的盈虧、漏單、斷線或其他損失，**均由使用者自行承擔**。作者與貢獻者不對任何直接或間接損害負責。
+
+使用前請自行評估風險，並遵守當地法規與券商條款。
+
+> **上實盤前必讀**  
+> 1. 完整閱讀 [docs/LIVE_SAFETY.md](docs/LIVE_SAFETY.md) 並執行 [docs/UAT_CHECKLIST.md](docs/UAT_CHECKLIST.md)（consuming app 整合驗收）  
+> 2. **一律使用 `get_state_snapshot()` 觀察狀態** — 切勿直接修改 `TradingEngine` 的 `position_qty`、`is_pending`、`pending_*` 等屬性  
 
 ## Status
 
 **0.x 實驗期** — API 可能調整。Kernel 不變量（pending 期間不重複 entry、kernel 擁有 force-flatten、`position_qty` 由 sync+fill 維護、錯誤 order_id 忽略等）有測試覆蓋。
 
-**Live 實盤風險自負** — 本 repo 提供執行狀態機，不保證獲利或零故障；請先在 simulation 驗證。
+## Live Trading Safety & Known Limitations
+
+- **Position 模型**：單一方向、全倉進出；`sync_positions` 只取第一筆匹配的非零部位。設計目標是 ~1 口台指日盤策略，**不是**通用部位管理（scale-in、減碼留倉、多商品組合均不支援）。詳見 [SPEC.md §4.2.1](SPEC.md)。
+- **狀態觀察**：使用 `engine.get_state_snapshot()` 唯讀觀察。**切勿**直接修改 `TradingEngine` 的 `position_qty`、`is_pending`、`pending_*`、`daily_pnl`、`block_new_entry` 等屬性 — 外部寫入可能破壞狀態機。
+- **失敗模式**：斷線、pending 超時、CA 失敗、重登入耗盡等情境的行為與後果見 [docs/LIVE_SAFETY.md](docs/LIVE_SAFETY.md)。
+
+## Go-Live Checklist
+
+上實盤前建議逐項確認：
+
+- [ ] 已在 **simulation / paper trade** 跑過完整交易日
+- [ ] API key、CA 憑證放在 `.env`，**未** commit 至 git（見 [.env.example](.env.example)）
+- [ ] `AlertPort` 可送 **CRITICAL** 通知（斷線、pending 超時、重登入失敗）
+- [ ] 手動演練：斷線重連、`sync_positions`、session 末 force-flatten
+- [ ] 小口資金；監控 `SIGNAL_AUDIT` / `FILL_AUDIT` / `DAILY_SUMMARY` log
+- [ ] 確認 `block_new_entry` 觸發後策略不再進場
+- [ ] 策略回傳的 `OrderSignal` 通過 kernel 驗證（`qty > 0`、合法 intent/action）
+- [ ] 不在 kernel 管理的同一合約上手動下單
+- [ ] 已完成 [docs/UAT_CHECKLIST.md](docs/UAT_CHECKLIST.md) Phase A–D
 
 ## 支援範圍
 
@@ -36,17 +72,17 @@
 pip install git+https://github.com/timhwchuang/trading-engine.git
 
 # 鎖定 tag（建議發版時打 git tag）
-pip install git+https://github.com/timhwchuang/trading-engine.git@v0.1.0
+pip install git+https://github.com/timhwchuang/trading-engine.git@v0.2.0
 
 # Live 需要 Shioaji SDK
-pip install "trading-engine[shioaji] @ git+https://github.com/timhwchuang/trading-engine.git@v0.1.0"
+pip install "trading-engine[shioaji] @ git+https://github.com/timhwchuang/trading-engine.git@v0.2.0"
 ```
 
 在 consuming repo 的 `pyproject.toml`：
 
 ```toml
 dependencies = [
-  "trading-engine @ git+https://github.com/timhwchuang/trading-engine.git@v0.1.0",
+  "trading-engine @ git+https://github.com/timhwchuang/trading-engine.git@v0.2.0",
 ]
 ```
 
@@ -65,7 +101,9 @@ pip install -e ".[shioaji]"   # + 永豐 Shioaji（live）
 | Layer | Module | Responsibility |
 |-------|--------|----------------|
 | Kernel | `engine.py`, `session.py`, `order_executor.py` | 狀態機；核心路徑無 runtime `import shioaji` |
-| Types | `core/types.py` | `TickSnapshot`, `PositionSnapshot`, `OrderSignal`, `RiskGate` |
+| Types | `core/types.py` | `TickSnapshot`, `PositionSnapshot`, `OrderSignal`, `RiskGate`, `EngineStateSnapshot` |
+| State | `get_state_snapshot()` | 唯讀觀察；勿直接 mutate engine 屬性 |
+| Position | `position_qty` | 單方向、全倉進出（見 SPEC §4.2.1） |
 | Live（永豐） | `adapters/shioaji_live.py` | Callback、subscribe、`TickFOPv1` → `TickSnapshot`、重連重訂閱 |
 | Orders | `adapters/shioaji.py` / `mock.py` | Shioaji IOC 建單 / Mock 建單 |
 
@@ -75,7 +113,33 @@ pip install -e ".[shioaji]"   # + 永豐 Shioaji（live）
 
 ### 1. Live（永豐 Shioaji）
 
-需先向永豐申請 API key、CA 憑證；設定由 app 層載入（見 `Settings` / `RuntimeConfig`）。
+需先向永豐申請 API key、CA 憑證；設定由 app 層載入（見 `Settings` / `RuntimeConfig`）。最小範例見 [examples/minimal_live/](examples/minimal_live/)。
+
+### Secrets
+
+```bash
+cp .env.example .env
+# 編輯 .env — 切勿 commit
+```
+
+| 變數 | 用途 |
+|------|------|
+| `SJ_API_KEY` | 永豐 API key |
+| `SJ_SEC_KEY` | 永豐 secret |
+| `SJ_CA_PATH` | CA 憑證路徑（live） |
+| `SJ_CA_PASSWD` | CA 密碼（live） |
+| `SJ_CA_PERSON_ID` | CA 啟用備援 person_id（選填） |
+
+### Logging（consuming app 已有設定時）
+
+`trading_engine` 預設在首次 `get_logger()` 時呼叫 `setup_async_logging()`，會清空 **root** logger 的 handlers。若你的 app 已在 import engine 前配置好 logging，請在 import 前改為：
+
+```python
+from trading_engine.logging_setup import setup_async_logging
+setup_async_logging(configure_root=False)  # 只設定 trading_engine logger，不動 root
+```
+
+### Live wiring
 
 ```python
 import shioaji as sj
@@ -144,7 +208,7 @@ assert host.position_qty == 2
 python run_tests.py
 ```
 
-**63** kernel tests（qty、adversarial callbacks、reconnect、sync、force-flatten、core 無 shioaji import）。  
+**73** kernel tests（qty、adversarial callbacks、reconnect、sync、force-flatten、signal validation、state snapshot、core 無 shioaji import）。  
 整合測（策略 + live smoke）在 consuming app repo。  
 CI：push / PR 至 `main` 時自動跑 `python run_tests.py`（Python 3.11–3.13）。
 
@@ -152,12 +216,20 @@ CI：push / PR 至 `main` 時自動跑 `python run_tests.py`（Python 3.11–3.1
 
 ```python
 import trading_engine
-print(trading_engine.__version__)  # 0.1.0
+print(trading_engine.__version__)  # 0.2.0
+```
+
+## Observing engine state
+
+```python
+snap = engine.get_state_snapshot()
+print(snap.position_qty, snap.is_pending, snap.block_new_entry)
+# snap is frozen — do not mutate engine fields directly
 ```
 
 ## Extending
 
-- **策略**：實作 `trading_engine.core.strategy.Strategy` Protocol，在 app 注入 `TradingEngine(strategy=...)`
+- **策略**：實作 `trading_engine.core.strategy.Strategy` Protocol（見 [docs/STRATEGY.md](docs/STRATEGY.md)），在 app 注入 `TradingEngine(strategy=...)`
 - **副作用**：Telemetry / Archive / Alerts 用 port 注入，不寫進 kernel
 - **不計畫**：新增其他券商 adapter；若要 fork 請自行維護
 

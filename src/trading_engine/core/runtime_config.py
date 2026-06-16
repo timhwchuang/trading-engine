@@ -120,6 +120,16 @@ class RuntimeConfig:
     def ca_passwd(self) -> str:
         return os.environ.get("SJ_CA_PASSWD", "")
 
+    def warn_if_placeholder_credentials(self, *, simulation: bool) -> None:
+        """Warn when live credentials were not configured via environment."""
+        if simulation:
+            return
+        import logging
+
+        log = logging.getLogger("trading_engine")
+        if self.api_key == "YOUR_API_KEY" or self.secret_key == "YOUR_SECRET_KEY":
+            log.warning("SJ_API_KEY / SJ_SEC_KEY 仍為預設值；請設定 .env 或環境變數後再登入")
+
     @property
     def dump_order_events(self) -> bool:
         return False
