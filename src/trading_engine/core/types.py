@@ -68,6 +68,8 @@ class RiskGate:
     daily_pnl: float
     after_flatten_time: bool
     force_flatten: bool
+    atr_stale: bool = False
+    reconnect_warmup_active: bool = False
 
 
 @dataclass(frozen=True)

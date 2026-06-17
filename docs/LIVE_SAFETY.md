@@ -81,11 +81,35 @@ This document describes what the kernel does when things go wrong during live op
 
 | | |
 |---|---|
-| **Kernel behavior** | `refresh_atr` runs in a daemon thread. Failure logs `ATR 更新失敗` warning; **last known** `current_atr` / `trend_dir` retained. No automatic `block_new_entry`. |
-| **Expected outcome** | Strategy may use stale ATR/trend; vol thresholds and trailing logic may be wrong. |
-| **Operator action** | Monitor ATR log lines. Strategy should treat stale indicators conservatively (future: kernel may expose `_atr_stale` flag). |
+| **Kernel behavior** | `refresh_atr` runs in a daemon thread. Failure logs `ATR 更新失敗` warning; **last known** `current_atr` / `trend_dir` retained. `last_atr_refresh` advances **only on success**; failures retry on a shorter interval. `RiskGate.atr_stale=True` when age > `atr_refresh_sec × atr_stale_multiplier` (default 2×). Strategy blocks **new entry** when stale; exits still allowed. |
+| **Expected outcome** | Stale periods: no new entries; open positions still managed. |
+| **Operator action** | Monitor `ATR(20) 更新` log cadence. Investigate kbars API failures if stale persists. |
 
-**Code:** `engine.py:refresh_atr`, `_maybe_refresh_atr`
+**Code:** `engine.py:refresh_atr`, `_maybe_refresh_atr`, `_is_atr_stale`
+
+---
+
+### Reconnect warmup (P4-13)
+
+| | |
+|---|---|
+| **Kernel behavior** | After `_on_reconnected`, synchronous `refresh_atr()` then `_pending_reconnect_warmup=True`. On the **first post-reconnect tick**, `reconnect_warmup_until_ts = tick_ts + reconnect_warmup_sec` (default 300s) so long disconnects still get a full warmup window. `RiskGate.reconnect_warmup_active` blocks **new entry** until exchange tick ts passes warmup end. Exits / force-flatten still allowed. |
+| **Expected outcome** | No momentum entries on partially-filled VWAP/ATR windows immediately after reconnect. |
+| **Operator action** | UAT: manual disconnect 30–60s; confirm no entry during warmup log line window. |
+
+**Code:** `engine.py:_on_reconnected`, `_is_reconnect_warmup_active`
+
+---
+
+### Repeated disconnects (P4-13)
+
+| | |
+|---|---|
+| **Kernel behavior** | Each connected→disconnected transition increments `_disconnect_count_today`. At `max_disconnects_per_day` (default 3): `block_new_entry=True` until trading-day reset + CRITICAL alert. Disconnect with open position sends CRITICAL alert when `alert_on_disconnect_with_position=true`. |
+| **Expected outcome** | Choppy network days stop new risk after threshold; operator notified on position + disconnect. |
+| **Operator action** | Fix network; do not clear `block_new_entry` until day rollover without manual override. |
+
+**Code:** `engine.py:_mark_disconnected`, `order_executor.py:_reset_daily_state`
 
 ---
 

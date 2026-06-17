@@ -4,6 +4,18 @@ All notable changes to `trading-engine` are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).  
 Versioning follows [SemVer](https://semver.org/) (0.x = API may still evolve).
 
+## [0.2.2] - 2026-06-17
+
+### Added
+- **P0** `RiskGate.atr_stale`: blocks new entries when last successful ATR refresh is older than `atr_refresh_sec × atr_stale_multiplier` (default 2×).
+- **P4-13** Reconnect warmup: `reconnect_warmup_sec` (default 300) blocks new entries after reconnect until exchange tick ts catches up; exits still allowed.
+- **P4-13** Daily disconnect limit: `max_disconnects_per_day` (default 3) sets `block_new_entry` + CRITICAL alert.
+- **P4-13** Alert on disconnect with open position (`alert_on_disconnect_with_position`, default true).
+
+### Changed
+- ATR refresh: `last_atr_refresh` advances only on **successful** kbars fetch; failed refreshes retry sooner (30s when never succeeded, else `atr_refresh_sec`).
+- `_maybe_refresh_atr` uses in-flight guard to avoid duplicate daemon threads.
+
 ## [0.2.1] - 2026-06-16
 
 Patch release to support `strategy-vwap-momentum` v0.1.0 (first public reference strategy plugin) and improve sweep integration.

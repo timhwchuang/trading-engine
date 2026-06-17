@@ -66,6 +66,10 @@ def default_test_settings() -> Settings:
         session_watchdog_sec=30.0,
         session_relogin_max_attempts=5,
         session_relogin_backoff_base_sec=5.0,
+        atr_stale_multiplier=2.0,
+        reconnect_warmup_sec=300,
+        max_disconnects_per_day=3,
+        alert_on_disconnect_with_position=True,
         config_path=Path("config/config.yaml"),
     )
 

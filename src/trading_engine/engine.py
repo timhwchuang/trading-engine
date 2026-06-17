@@ -102,6 +102,10 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         self._resynced_position = False  # sync_positions 後待首 tick 校準 trailing_peak
         self._api_connected = True
         self._disconnect_since = 0.0
+        self._disconnect_count_today = 0
+        self._reconnect_warmup_until_ts = 0
+        self._pending_reconnect_warmup = False
+        self._atr_refresh_in_flight = False
         self._session_relogin_attempts = 0
         self._next_relogin_at = 0.0
         self._exit_order_retry_count = 0
@@ -248,6 +252,28 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
                 ticks_since_entry=self.ticks_since_entry,
             )
 
+    def _is_atr_stale(self, ts: int) -> bool:
+        success_ts = int(self.indicators.last_atr_refresh)
+        if success_ts <= 0:
+            return True
+        stale_after = int(self._cfg.atr_refresh_sec * self._cfg.atr_stale_multiplier)
+        return ts - success_ts > stale_after
+
+    def _is_reconnect_warmup_active(self, ts: int) -> bool:
+        return self._reconnect_warmup_until_ts > 0 and ts < self._reconnect_warmup_until_ts
+
+    def _arm_reconnect_warmup_on_first_tick_locked(self, ts: int) -> None:
+        if not self._pending_reconnect_warmup:
+            return
+        warmup_sec = self._cfg.reconnect_warmup_sec
+        self._reconnect_warmup_until_ts = ts + warmup_sec
+        self._pending_reconnect_warmup = False
+        logger.info(
+            "重連暖機開始 | %ds 內禁止新進場（until_ts=%d）",
+            warmup_sec,
+            self._reconnect_warmup_until_ts,
+        )
+
     def _risk_gate(self, ts: int, dt: datetime.datetime) -> RiskGate:
         return RiskGate(
             api_connected=self._api_connected,
@@ -260,6 +286,8 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
             daily_pnl=self.daily_pnl,
             after_flatten_time=self._calendar.is_at_or_after(dt, self._cfg.session_flatten_time),
             force_flatten=self._calendar.is_at_or_after(dt, self._cfg.session_force_flatten_time),
+            atr_stale=self._is_atr_stale(ts),
+            reconnect_warmup_active=self._is_reconnect_warmup_active(ts),
         )
 
     def _parse_tick_locked(self, tick: Any) -> tuple[int, float, int, int, int]:
@@ -314,6 +342,7 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
                 )
 
             self._record_tick_arrival_locked(ts, exchange_dt, tick_type)
+            self._arm_reconnect_warmup_on_first_tick_locked(ts)
             self._telemetry.record_atr(self.indicators.current_atr)
             self._maybe_refresh_atr(ts)
             self.indicators.update_vwap(ts, price, volume)
@@ -360,9 +389,22 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
             self._enqueue_order(signal)
 
     def _maybe_refresh_atr(self, ts: int):
-        if ts - self.indicators.last_atr_refresh >= self._cfg.atr_refresh_sec:
-            self.indicators.last_atr_refresh = ts
-            threading.Thread(target=self.refresh_atr, daemon=True).start()
+        if self._atr_refresh_in_flight:
+            return
+        last_success = int(self.indicators.last_atr_refresh)
+        last_attempt = int(self.indicators.last_atr_refresh_attempt)
+        retry_interval = (
+            min(30, self._cfg.atr_refresh_sec)
+            if last_success <= 0
+            else self._cfg.atr_refresh_sec
+        )
+        if last_attempt > 0 and ts - last_attempt < retry_interval:
+            return
+        if last_success > 0 and ts - last_success < self._cfg.atr_refresh_sec:
+            return
+        self.indicators.last_atr_refresh_attempt = float(ts)
+        self._atr_refresh_in_flight = True
+        threading.Thread(target=self.refresh_atr, daemon=True).start()
 
     def _today(self) -> datetime.date:
         """交易所「今天」：有 tick 時以 tick 日期為準（回測確定性），否則用系統日期。"""
@@ -404,10 +446,13 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
                 with self.lock:
                     trend_dir = self.indicators.trend_dir
                     trend_strength = self.indicators.trend_strength
+            refresh_ts = float(self.last_tick_exchange_ts or 0)
             with self.lock:
                 self.indicators.current_atr = atr
                 self.indicators.trend_dir = trend_dir
                 self.indicators.trend_strength = trend_strength
+                if refresh_ts > 0:
+                    self.indicators.last_atr_refresh = refresh_ts
                 if used_long:
                     self.indicators._atr_long_lookback_date = today
             lookback_label = f"{self._cfg.atr_kline_lookback_days}d" if used_long else "當日"
@@ -430,6 +475,8 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
                     logger.warning("Kbars 落盤失敗: %s", arch_err)
         except Exception as e:
             logger.warning("ATR 更新失敗: %s", e)
+        finally:
+            self._atr_refresh_in_flight = False
 
     def _vol_threshold(self, dt: datetime.datetime) -> tuple[float, float, float]:
         """P1-2: (base_vol, multiplier, vol_threshold)."""
@@ -617,10 +664,39 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
                 self._next_relogin_at = now + backoff
 
     def _mark_disconnected(self) -> None:
+        alert_qty = 0
+        alert_dir = "Flat"
         with self.lock:
+            was_connected = self._api_connected
             self._api_connected = False
             if self._disconnect_since <= 0:
                 self._disconnect_since = self._clock()
+            if was_connected:
+                self._disconnect_count_today += 1
+                alert_qty = self.position_qty
+                alert_dir = self.position_dir
+                disconnect_count = self._disconnect_count_today
+            else:
+                disconnect_count = self._disconnect_count_today
+        if not was_connected:
+            return
+        if (
+            alert_qty > 0
+            and self._cfg.alert_on_disconnect_with_position
+        ):
+            self._alerts.send(
+                f"API 斷線且有持倉 | dir={alert_dir} qty={alert_qty} | "
+                f"第 {disconnect_count} 次斷線（今日）",
+                level="CRITICAL",
+            )
+        if disconnect_count >= self._cfg.max_disconnects_per_day:
+            with self.lock:
+                self.block_new_entry = True
+            self._alerts.send(
+                f"單日斷線達 {disconnect_count} 次（上限 "
+                f"{self._cfg.max_disconnects_per_day}）→ 停止新進場至日切換；請排查網路",
+                level="CRITICAL",
+            )
 
     def _clear_pending(self):
         self.is_pending = False
@@ -676,12 +752,14 @@ class TradingEngine(OrderExecutorMixin, SessionMixin):
         self.refresh_atr()
 
         with self.lock:
+            self._pending_reconnect_warmup = True
+            self._reconnect_warmup_until_ts = 0
             self._api_connected = True
             self._disconnect_since = 0.0
             self._session_relogin_attempts = 0
             self._next_relogin_at = 0.0
 
-        logger.info("重連後狀態同步完成")
+        logger.info("重連後狀態同步完成（暖機待首筆 tick 起算）")
 
     def run(self) -> None:
         """Broker-neutral blocking run loop (login + live wiring must be done first)."""

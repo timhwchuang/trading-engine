@@ -70,6 +70,10 @@ class Settings:
     session_watchdog_sec: float
     session_relogin_max_attempts: int
     session_relogin_backoff_base_sec: float
+    atr_stale_multiplier: float = 2.0
+    reconnect_warmup_sec: int = 300
+    max_disconnects_per_day: int = 3
+    alert_on_disconnect_with_position: bool = True
 
     config_path: Path = Path("")
 

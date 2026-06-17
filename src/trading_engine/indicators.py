@@ -30,6 +30,7 @@ class IndicatorState:
 
         self.current_atr = 0.0
         self.last_atr_refresh = 0.0
+        self.last_atr_refresh_attempt = 0.0
         self._atr_long_lookback_date: datetime.date | None = None
         self.trend_dir = "Flat"
         self.trend_strength = 0.0

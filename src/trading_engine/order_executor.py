@@ -130,6 +130,7 @@ class OrderExecutorMixin:
         self.daily_pnl = 0.0
         self.block_new_entry = False
         self.consecutive_loss = 0
+        self._disconnect_count_today = 0
 
     def _emit_daily_summary(self, trade_date: datetime.date) -> None:
         self._telemetry.snapshot_tick_types(self._tick_type_counts)
