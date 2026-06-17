@@ -72,17 +72,17 @@
 pip install git+https://github.com/timhwchuang/trading-engine.git
 
 # 鎖定 tag（建議發版時打 git tag）
-pip install git+https://github.com/timhwchuang/trading-engine.git@v0.2.0
+pip install git+https://github.com/timhwchuang/trading-engine.git@v0.2.2
 
 # Live 需要 Shioaji SDK
-pip install "trading-engine[shioaji] @ git+https://github.com/timhwchuang/trading-engine.git@v0.2.0"
+pip install "trading-engine[shioaji] @ git+https://github.com/timhwchuang/trading-engine.git@v0.2.2"
 ```
 
 在 consuming repo 的 `pyproject.toml`：
 
 ```toml
 dependencies = [
-  "trading-engine @ git+https://github.com/timhwchuang/trading-engine.git@v0.2.0",
+  "trading-engine @ git+https://github.com/timhwchuang/trading-engine.git@v0.2.2",
 ]
 ```
 
@@ -216,7 +216,7 @@ CI：push / PR 至 `main` 時自動跑 `python run_tests.py`（Python 3.11–3.1
 
 ```python
 import trading_engine
-print(trading_engine.__version__)  # 0.2.0
+print(trading_engine.__version__)  # 0.2.2
 ```
 
 ## Observing engine state

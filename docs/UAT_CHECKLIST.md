@@ -1,6 +1,6 @@
 # UAT Checklist (kernel / consuming app integration)
 
-Use when integrating `trading-engine@v0.2.0` for simulation → paper → small live.
+Use when integrating `trading-engine@v0.2.2` for simulation → paper → small live.
 
 **App deployment** (Windows env, tick archive, reporting): [trading-app `docs/UAT_CHECKLIST.md`](https://github.com/timhwchuang/trading-app/blob/main/docs/UAT_CHECKLIST.md) Phase A/B — run **before** Phase B below.
 
@@ -12,7 +12,7 @@ Prerequisites: [README § Go-Live](../README.md), [LIVE_SAFETY.md](LIVE_SAFETY.m
 
 | # | Item | Pass | Notes / date |
 |---|------|:----:|--------------|
-| A1 | App pins `trading-engine@v0.2.0` (git tag) | ☐ | |
+| A1 | App pins `trading-engine@v0.2.2` (git tag) | ☐ | |
 | A2 | `.env` from `.env.example`; **not** in git | ☐ | |
 | A3 | `python run_tests.py` green in trading-engine repo | ☐ | 73 tests |
 | A4 | App boots with `ShioajiLiveBootstrap` + injected ports | ☐ | |
@@ -62,7 +62,7 @@ Prerequisites: [README § Go-Live](../README.md), [LIVE_SAFETY.md](LIVE_SAFETY.m
 | Field | Value |
 |-------|-------|
 | App / strategy repo | |
-| trading-engine tag | v0.2.0 |
+| trading-engine tag | v0.2.2 |
 | UAT owner | |
 | Simulation completed | |
 | Paper sessions (count) | |
